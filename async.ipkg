@@ -1,0 +1,18 @@
+package async
+version = 0.1.0
+authors = "stefan-hoeck"
+brief   = "Asynchronous and concurrent computations in Idris2"
+
+depends = base >= 0.7.0
+        , containers
+        , quantifiers-extra
+
+modules = IO.Async
+        , IO.Async.Event
+        , IO.Async.Fiber
+        , IO.Async.MVar
+        , IO.Async.Outcome
+        , IO.Async.Resource
+        , IO.Async.Token
+
+sourcedir = "src"
