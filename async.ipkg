@@ -13,6 +13,7 @@ modules = IO.Async
         , IO.Async.MVar
         , IO.Async.Outcome
         , IO.Async.Resource
+        , IO.Async.ThreadPool
         , IO.Async.Token
 
 sourcedir = "src"
