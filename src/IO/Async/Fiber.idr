@@ -180,6 +180,10 @@ async : ((Outcome es a -> IO ()) -> IO ()) -> Async es a
 async f = Asnc P (\o => f o $> Nothing)
 
 export
+lazy : Lazy a -> Async es a
+lazy v = async (\f => f $ Succeeded v)
+
+export
 join : Fiber es a -> Async fs (Outcome es a)
 join f = do
   t <- self
@@ -390,6 +394,12 @@ parF fs = do
 export %inline
 par : All (Async es) ts -> Async es (HList ts)
 par = parF . mapProperty start
+
+export
+parTraverse : (a -> Async es b) -> List a -> Async es (List b)
+parTraverse f vs = do
+  fibers <- traverse (start . f) vs
+  traverse joinResult fibers
 
 export covering
 runAsyncWith : ExecutionContext => Async es a -> (Outcome es a -> IO ()) -> IO ()
