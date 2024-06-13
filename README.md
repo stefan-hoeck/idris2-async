@@ -2,8 +2,10 @@
 
 This is a library for running cancelable asynchronous computations
 with proper error handling in Idris2. Depending on the backend you
-use, this also offers true parallelism that is, computations running in
-parallel on multicore systems.
+use, this also offers true parallelism, that is, computations running in
+parallel on multicore systems. It was strongly inspired by the
+[cats-effect](https://typelevel.org/cats-effect/) library written in
+Scala, although it is by far not as battle hardened as is antetype.
 
 This is a literate Idris source file, so you can compile and run it.
 It is recommended to use [pack](https://github.com/stefan-hoeck/idris2-pack)
@@ -18,6 +20,7 @@ Before we start, let's import a couple of modules:
 ```idris
 module README
 
+import Data.List
 import IO.Async
 import IO.Async.ThreadPool
 import IO.Async.Scheduler
@@ -35,7 +38,7 @@ listed in `es` and yield a result of type `a` if all goes well.
 Before we look at a first example, we need to get our terminology straight.
 
 * synchronous: A sequence of effectful computations is *synchronous*, if
-  they produce their results one after the other, in the order given in the
+  they produce their results one after the other in the order given in the
   sequence.
 * asynchronous: A sequence of effectful computations is *asynchronous*,
   if the computations seem to run simultaneously in no clear order.
@@ -47,7 +50,7 @@ Before we look at a first example, we need to get our terminology straight.
 
 In order to demonstrate the difference, we define two countdowns:
 One for counting down seconds, the other counting down milliseconds
-(in 10 ms steps):
+(in 100 ms steps):
 
 ```idris
 countSeconds : Scheduler => Nat -> Async [] ()
@@ -68,16 +71,16 @@ countMillis (S k) = do
 This is very straight forward: On every recursive step, we *sleep*
 for a short amount of time, before continuing the computation. Since
 these are `do` blocks, computations are connected via *bind* `(>>=)`,
-and this means strict sequencing computations. Bind will not and
-can not change the order in which the computations are being run,
+and this means strict sequencing of computations. Bind will not and
+cannot change the order in which the computations are being run,
 and it will only proceed to the next computation
 when the current one has finished with a result.
 
 Note, however, that in the examples above there is not blocking of
-a operating system thread, even though we call `sleep`. I will explain this in
-greater details later when we talk about `Fiber`s but for now, suffice
+an operating system thread, even though we call `sleep`. I will explain this in
+greater detail later when we talk about `Fiber`s, but for now suffice
 to say that the `sleep` used above (from module `IO.Async.Scheduler.sleep`)
-is much more powerful than `System.sleep` from the base library although
+is more powerful than `System.sleep` from the base library although
 they semantically do the same thing: They stop a sequence of computations
 for a predefined amount of time.
 
@@ -136,7 +139,10 @@ countParallel = do
 
 If you try this example by running `main` with the `"par"` argument, you will
 notice that the messages from the two countdowns are now interleaved giving
-at least the illusion of concurrency.
+at least the illusion of concurrency. However, just like `sleep` and unlike
+`Prelude.threadWait`, `joinResult` will not block the current operating
+system thread, and other computations could still run concurrently on the
+current thread.
 
 ```sh
 > pack -o async exec docs/src/README.md par
@@ -179,7 +185,7 @@ until the faster of the two terminates:
 ```idris
 raceParallel : Scheduler => Async [] ()
 raceParallel =
-  putStrLn "Racing countdowns" >> race [ countSeconds 2, countMillis 10 ]
+  putStrLn "Racing countdowns" >> race [ countSeconds 10000, countMillis 10 ]
 ```
 
 Running this with the `"race"` command-line argument gives the
@@ -203,7 +209,100 @@ Millisecond counter done.
 ```
 
 As you can see, after the millisecond counter finishes, the seconds counter
-is canceled immediately and the application terminates.
+is canceled immediately and the application terminates even though the seconds
+counter had still a long time to go!
+
+## Fibers
+
+Just like in cats-effect, a `Fiber` is the main abstraction this library offers.
+It is sometimes also called a *green thread* because just like an operating
+system thread it describes a chain of computations running sequentially. However,
+unlike operating system threads, which are an extremely scarce resource,
+fibers are very lightweight. Don't believe me? Let's create an application
+computing a huge number of Fibonacci numbers concurrently:
+
+```idris
+fibo : Nat -> Nat
+fibo 0         = 1
+fibo 1         = 1
+fibo (S $ S k) = fibo k + fibo (S k)
+
+sumFibos : Nat -> Nat -> Async [] ()
+sumFibos nr fib = do
+  vs <- parTraverse (\n => lazy (fibo n)) (replicate nr fib)
+  printLn (sum vs)
+```
+
+You can try this by running the example application like so:
+
+```sh
+> pack -o async exec docs/src/README.md fibo 1000 20
+10946000
+```
+
+The first numeric argument is the number of concurrent computations to
+run (and thus, the number of fibers that will be created), the second
+tells the application what Fibonacci number to compute. If you feel
+adventurous, try increasing the number of fibers to one million.
+This will undoubtedly consume quite a bit of memory and take more
+than a minute to terminate, but terminate it will. It would be
+unthinkable to create that number of operating system threads!
+
+### But what about parallelism?
+
+The ability to create an almost unlimited amount of concurrently
+running computations is a big advantage of fibers. But what about
+true parallelism? Can the computations actually be run on several
+physical cores?
+
+The answer to that depends on the backend we use. This example
+application is supposed to be run on one of Idris's Scheme backends,
+and can thus make use of more than one physical core. The core function for
+running an `Async` computation is `IO.Async.Fiber.runAsyncWith`, which
+takes an `ExecutionContext` as an implicit argument.
+
+An `ExecutaionContext`'s main functionality is to provide function
+`submit`, which allows us to enqueue an arbitrary `IO` action that
+will then be processed by the execution context. One implementation
+of this type is provided in module `IO.Async.ThreadPool`, which - just
+as the name implies - uses a fixed-size pool of operating system
+threads to process the enqueued `IO` actions. If the number of
+threads is greater than one, we get true parallelism when processing
+more than one fiber at a time.
+
+Here is a way to visualize this behavior. We again compute Fibonacci
+numbers, but this time we make sure that the numbers we compute are
+large enough to take hundreds of milliseconds at the least. In addition,
+we print ever result to get an idea of the runtime behavior:
+
+```idris
+sumVisFibos : Nat -> Nat -> Async [] ()
+sumVisFibos nr fib = do
+  vs <- parTraverse visFibo (replicate nr fib)
+  printLn (sum vs)
+
+  where
+    visFibo : Nat -> Async [] Nat
+    visFibo n = lazy (fibo n) >>= \x => printLn x $> x
+```
+
+Run this with the `"vis_fibo"` command-line argument, but before doing
+this you might want to change the number of operating system threads
+to use by setting environment variable `$IDRIS2_ASYNC_THREADS` (the
+default is to use four threads):
+
+```sh
+export IDRIS2_ASYNC_THREADS="2"
+pack -o async exec docs/src/README.md vis_fibo 10 42
+```
+
+With the arguments shown above, you will probably note
+that the results are always printed pairwise in quick
+succession before the app is again silent for a couple of
+seconds. By changing the number of threads you might get
+larger blocks of quickly printed results, an indicator that
+several computations are indeed processed in parallel before
+the next bunch of computations start.
 
 ## The `main` function
 
@@ -215,14 +314,18 @@ act : Scheduler => List String -> Async [] ()
 act ("par"   :: _) = countParallel
 act ("par2"  :: _) = countParallel2
 act ("race"  :: _) = raceParallel
+act ["fibo",x,y]   = sumFibos (cast x) (cast y)
+act ("fibo" :: _)  = sumFibos 1000 30
+act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
+act ("vis_fibo" :: _) = sumVisFibos 20 38
 act _              = countSequentially
 
 covering
-run : List String -> IO ()
-run args = do
+run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
+run threads args = do
   sc <- newSchedulerST
   t  <- fork $ process sc
-  app 4 $ act @{sc} args
+  app threads $ act @{sc} args
   stop sc
   threadWait t
 
@@ -230,7 +333,10 @@ covering
 main : IO ()
 main = do
   _::t <- getArgs | _ => die "Invalid arguments"
-  run t
+  s <- getEnv "IDRIS2_ASYNC_THREADS"
+  case cast {to = Nat} <$> s of
+    Just (S k) => run (S k) t
+    _          => run 4 t
 ```
 
 <!-- vi: filetype=idris2:syntax=markdown
