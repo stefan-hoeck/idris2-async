@@ -1,5 +1,6 @@
 module IO.Async.ThreadPool
 
+import public Data.Nat
 import Data.IORef
 import Data.Queue
 import Data.Vect
@@ -119,7 +120,7 @@ namespace ThreadPool
   stop : ThreadPool n -> IO ()
   stop (TP _ st ts _) = do
     traverse_ stop st
-    traverse_ (\x => threadWait x >> putStrLn "Thread done") ts
+    traverse_ (\x => threadWait x) ts
 
   ||| Submit a new `IO` action to be processed by the worker threads
   ||| in a thread pool.
@@ -131,5 +132,20 @@ namespace ThreadPool
 
 ||| Create an execution context from a thread pool.
 export %inline
-(.ec) : {n : _} -> ThreadPool (S n) -> (limit : Nat) -> ExecutionContext
-(.ec) wp limit = EC wp.tg (ThreadPool.submit wp) limit
+ec : {n : _} -> ThreadPool (S n) -> (limit : Nat) -> ExecutionContext
+ec wp limit = EC wp.tg (ThreadPool.submit wp) limit
+
+||| Run an asyncrhonous application on a thread pool with
+||| `n` physical threads.
+|||
+||| The calling thread is blocked until the application completes.
+export covering
+app : (n : Nat) -> {auto 0 _ : IsSucc n} -> Async [] () -> IO ()
+app (S m) act = do
+  tp <- newWorkPool (S m)
+  m  <- makeMutex
+  c  <- makeCondition
+  runAsyncWith @{ec tp 100} act (\_ => conditionBroadcast c)
+  mutexAcquire m
+  conditionWait c m
+  ThreadPool.stop tp

@@ -155,3 +155,23 @@ process = process' True
 export
 delay : (s : Scheduler) => (nanos : Nat) -> Async es a -> Async es a
 delay nanos act = cancelableAsync (map liftIO . submit s nanos act) >>= id
+
+||| Delay a computation by the given number of nanoseconds.
+export
+sleep : (s : Scheduler) => (nanos : Nat) -> Async es ()
+sleep nanos = delay nanos (pure ())
+
+||| Converts a number of seconds to nanoseconds
+export
+(.s) : Nat -> Nat
+n.s = n * 1_000_000_000
+
+||| Converts a number of milliseconds to nanoseconds
+export
+(.ms) : Nat -> Nat
+n.ms = n * 1_000_000
+
+||| Converts a number of microseconds to nanoseconds
+export
+(.us) : Nat -> Nat
+n.us = n * 1_000

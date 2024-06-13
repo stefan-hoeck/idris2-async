@@ -336,7 +336,7 @@ bracket acquire use release =
 
 ||| Semantically blocks the current fiber until one
 ||| of the given fibers has produced an outcome, in which
-||| the others are canceled immediately.
+||| case the others are canceled immediately.
 |||
 ||| This is useful if you for instance have several abort conditions
 ||| such as a timer and a signal from the operating system, and want
