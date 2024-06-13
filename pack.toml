@@ -2,3 +2,8 @@
 type = "local"
 path = "."
 ipkg = "async.ipkg"
+
+[custom.all.async-docs]
+type = "local"
+path = "docs"
+ipkg = "docs.ipkg"

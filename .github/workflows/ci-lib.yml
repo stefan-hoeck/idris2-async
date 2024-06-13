@@ -29,3 +29,5 @@ jobs:
         uses: actions/checkout@v2
       - name: Build lib
         run: pack --no-prompt install async
+      - name: Build docs
+        run: pack --no-prompt typecheck async-docs
