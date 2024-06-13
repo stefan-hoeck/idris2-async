@@ -37,16 +37,28 @@ listed in `es` and yield a result of type `a` if all goes well.
 
 Before we look at a first example, we need to get our terminology straight.
 
-* synchronous: A sequence of effectful computations is *synchronous*, if
-  they produce their results one after the other in the order given in the
-  sequence.
-* asynchronous: A sequence of effectful computations is *asynchronous*,
-  if the computations seem to run simultaneously in no clear order.
-  Wether they are actually run in parallel on several physical cores
-  or still one after the other on a single core is of no importance here.
-  What *is* important is that a potentially long running computation
-  does not block the whole application and other computations can
-  still be performed while we wait for the lengthy task to finish.
+* synchronous: Synchronous computations are typically defined via
+  `pure` or `liftIO`: They are the typical sequential effects we know
+  from the `IO` monad.
+* asynchronous: Asynchronous computations are defined using
+  `async` or `cancelableAsync` and produce their result by invoking
+  a callback. Especially in JavaScript, many methods work asynchronously
+  and will invoke a callback function once they have their result ready.
+  While this allows us to continue with other work until the desired
+  result is ready, working with (sometimes deeply nested) callbacks
+  can be cumbersome and verbose. One advantage of `Async` is that it
+  unifies synchronous and asynchronous effects in a single data
+  type allowing us to conveniently mix and sequence them via the
+  bind operator.
+* concurrency: Concurrent actions are independent in their control flow.
+  This is the opposite of "sequential" in the sense that concurrent
+  effects can occur in arbitrary order, since they are processed
+  independently.
+* parallelism: Two computations run *in parallel*, when they are
+  processed by more than one physical core or processor. Parallelism
+  always implies concurrency, but concurrency not necessarily implies
+  parallelism. For instance, on JavaScript - which is single-threaded -
+  computations can be run concurrently but obviously not in parallel.
 
 In order to demonstrate the difference, we define two countdowns:
 One for counting down seconds, the other counting down milliseconds
