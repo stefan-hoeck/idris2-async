@@ -371,6 +371,17 @@ greetApp = do
 
   sleep 5.s
   traverse_ cancel [f1,f2,f3]
+
+selfCancel : Async [] ()
+selfCancel = do
+  f <- start {es = []} $ do
+    uncancelable (canceled >> putStrLn "I was canceled but still print")
+    putStrLn "foo"
+  o <- join f
+  putStrLn $ case o of
+    Succeeded res => "Thread succeeded. Oops"
+    Canceled => "Thread was canceled. Yay!"
+    Error err impossible
 ```
 
 ## The `main` function
@@ -381,15 +392,16 @@ used to run the examples in this introduction.
 ```idris
 covering
 act : Scheduler => List String -> Async [] ()
-act ("par"   :: _) = countParallel
-act ("par2"  :: _) = countParallel2
-act ("race"  :: _) = raceParallel
-act ["fibo",x,y]   = sumFibos (cast x) (cast y)
-act ("fibo" :: _)  = sumFibos 1000 30
-act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
-act ("vis_fibo" :: _) = sumVisFibos 20 38
-act ("greet" :: _) = greetApp
-act _              = countSequentially
+act ("par"   :: _)          = countParallel
+act ("par2"  :: _)          = countParallel2
+act ("race"  :: _)          = raceParallel
+act ["fibo",x,y]            = sumFibos (cast x) (cast y)
+act ("fibo" :: _)           = sumFibos 1000 30
+act ["vis_fibo",x,y]        = sumVisFibos (cast x) (cast y)
+act ("vis_fibo" :: _)       = sumVisFibos 20 38
+act ("greet" :: _)          = greetApp
+act ("self_cancel" :: _)    = selfCancel
+act _                       = countSequentially
 
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
