@@ -375,8 +375,8 @@ greetApp = do
 selfCancel : Async [] ()
 selfCancel = do
   f <- start {es = []} $ do
-    uncancelable (canceled >> putStrLn "I was canceled but still print")
-    putStrLn "foo"
+    onCancel (uncancelable $ \_ => canceled >> putStrLn "I was canceled but still print") (putStrLn "Canceled!")
+    putStrLn "This is not printed"
   o <- join f
   putStrLn $ case o of
     Succeeded res => "Thread succeeded. Oops"
