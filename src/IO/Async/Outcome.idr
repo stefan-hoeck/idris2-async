@@ -14,6 +14,11 @@ public export
 0 Result : List Type -> Type -> Type
 Result es a = Either (HSum es) a
 
+||| Outcome of a fiber that completed its computation.
+|||
+||| A fiber can either produce a result successfully, fail
+||| with an error of one of the types given in the list of types
+||| or it can be canceled in which case the outcome is `Canceled`.
 public export
 data Outcome : List Type -> Type -> Type where
   Succeeded : (res : a) -> Outcome es a
