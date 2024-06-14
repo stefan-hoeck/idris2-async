@@ -316,21 +316,92 @@ larger blocks of quickly printed results, an indicator that
 several computations are indeed processed in parallel before
 the next bunch of computations start.
 
+### Cancelling fibers
+
+The ability to create thousands of concurrent computations raises
+the question about controlling them, in particular, about
+cancelling them when they are no longer needed.
+
+Fortunately, this can be easily done with the `cancel` action. As an
+example - I took this from the cats-effect web page -
+we generate three fibers running forever concurrently, and
+cancel them all after a short delay.
+
+First, we need some kind of random number generation. Since the Idris
+standard libraries do not offer such a thing, I just quickly copied
+the relevant code from contrib:
+
+```idris
+%foreign "scheme:blodwen-random"
+         "javascript:lambda:(max)=>Math.floor(Math.random() * max)"
+prim__randomBits32 : Bits32 -> PrimIO Bits32
+
+randomRange : HasIO io => Bits32 -> Bits32 -> io Bits32
+randomRange mi ma = (mi +) <$> primIO (prim__randomBits32 $ ma - mi)
+```
+
+Next, we define an action that prints a greeting after a random
+delay, plus a utility for repeating an effect infinitely:
+
+```idris
+greet : Scheduler => (word, name : String) -> Async [] ()
+greet word name = do
+  t <- randomRange 100 700
+  sleep (cast t).ms
+  putStrLn "\{word}, \{name}"
+
+covering
+forever : Monad m => Lazy (m ()) -> m ()
+forever x = x >> forever x
+```
+
+Finally, our greeting application asks for a name and keeps
+printing greetings in three different languages until after
+five seconds, the cacophony is fortunately stopped:
+
+```idris
+covering
+greetApp : Scheduler => Async [] ()
+greetApp = do
+  putStrLn "Hello! What's your name?"
+  n  <- getLine
+  f1 <- start . forever $ greet "Hallo" n
+  f2 <- start . forever $ greet "Bonjour" n
+  f3 <- start . forever $ greet "Hola" n
+
+  sleep 5.s
+  traverse_ cancel [f1,f2,f3]
+
+selfCancel : Async [] ()
+selfCancel = do
+  f <- start {es = []} $ do
+    onCancel (uncancelable $ \_ => canceled >> putStrLn "I was canceled but still print") (putStrLn "Canceled!")
+    putStrLn "This is not printed"
+  o <- join f
+  putStrLn $ case o of
+    Succeeded res => "Thread succeeded. Oops"
+    Canceled => "Thread was canceled. Yay!"
+    Error err impossible
+```
+
 ## The `main` function
 
 This final sections only shows the `main` functions and a few utilities
 used to run the examples in this introduction.
 
 ```idris
+covering
 act : Scheduler => List String -> Async [] ()
-act ("par"   :: _) = countParallel
-act ("par2"  :: _) = countParallel2
-act ("race"  :: _) = raceParallel
-act ["fibo",x,y]   = sumFibos (cast x) (cast y)
-act ("fibo" :: _)  = sumFibos 1000 30
-act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
-act ("vis_fibo" :: _) = sumVisFibos 20 38
-act _              = countSequentially
+act ("par"   :: _)          = countParallel
+act ("par2"  :: _)          = countParallel2
+act ("race"  :: _)          = raceParallel
+act ["fibo",x,y]            = sumFibos (cast x) (cast y)
+act ("fibo" :: _)           = sumFibos 1000 30
+act ["vis_fibo",x,y]        = sumVisFibos (cast x) (cast y)
+act ("vis_fibo" :: _)       = sumVisFibos 20 38
+act ("greet" :: _)          = greetApp
+act ("self_cancel" :: _)    = selfCancel
+act _                       = countSequentially
 
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()

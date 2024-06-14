@@ -622,13 +622,13 @@ run n fbr act i cs stck = do
 
      Cancel => do
        withLock fbr (writeIORef fbr.canceled True) >>
-       run k fbr (Term Canceled) i cs stck
+       run k fbr (pure ()) i cs stck
 
      GetEC => run k fbr (pure ec) i cs stck
 
      Bind x f => run k fbr x i cs (f::stck)
 
-     UC f => run k fbr (f i <* StopUC) (S i) (i::cs) stck
+     UC f => run k fbr (Bind (f i) (\o => StopUC >> Term o)) (S i) (i::cs) stck
 
      APoll j x => case cs of
        h::t =>
