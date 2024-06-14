@@ -44,24 +44,6 @@ record Fiber (es : List Type) (a : Type) where
   cancel        : IO ()
 
 --------------------------------------------------------------------------------
--- Cancelability
---------------------------------------------------------------------------------
-
--- Marks a section of an asynchronous computation to be
--- cancelable (`C`), uncancelable (`U`), or taking its cancelability
--- from the parent scope `P` (which is typically the default)
-data Cancelability = U | P | C
-
-%inline
-Semigroup Cancelability where
-  p <+> P = p
-  _ <+> p = p
-
-%inline
-Monoid Cancelability where
-  neutral = P
-
---------------------------------------------------------------------------------
 -- Async
 --------------------------------------------------------------------------------
 
@@ -71,9 +53,9 @@ export
 data Async : (es : List Type) -> Type -> Type where
   Term   : Outcome es a -> Async es a
 
-  Sync   : Cancelability -> IO (Result es a) -> Async es a
+  Sync   : IO (Result es a) -> Async es a
 
-  Start  : Cancelability -> Async es a -> Async fs (Fiber es a)
+  Start  : Async es a -> Async fs (Fiber es a)
 
   Shift  : ExecutionContext -> Async es ()
 
@@ -83,16 +65,21 @@ data Async : (es : List Type) -> Type -> Type where
 
   GetEC  : Async es ExecutionContext
 
-  Asnc  :
-       Cancelability
-    -> ((Outcome es a -> IO ()) -> IO (Maybe $ Async [] ()))
-    -> Async es a
+  Asnc   : ((Outcome es a -> IO ()) -> IO (Maybe $ Async [] ())) -> Async es a
 
-  Bind  :
-       Cancelability
-    -> Async es a
-    -> (Outcome es a -> Async fs b)
-    -> Async fs b
+  Bind   : Async es a -> (Outcome es a -> Async fs b) -> Async fs b
+
+  UC     : (Nat -> Async es a) -> Async es a
+
+  ContUC : Nat -> Async es ()
+
+  APoll  : Nat -> Async es a -> Async es a
+
+  StopUC : Async es ()
+
+public export
+0 Poll : Type
+Poll = {0 es : _} -> {0 a : _} -> Async es a -> Async es a
 
 --------------------------------------------------------------------------------
 -- Interface Implementations
@@ -104,11 +91,11 @@ succeed = Term . Succeeded
 
 export %inline
 sync : IO (Result es a) -> Async es a
-sync = Sync P
+sync = Sync
 
 bind : Async es a -> (a -> Async es b) -> Async es b
 bind x f =
-  Bind P x $ \case
+  Bind x $ \case
     Succeeded v => f v
     Error x     => Term (Error x)
     Canceled    => Term Canceled
@@ -134,29 +121,9 @@ HasIO (Async es) where
 -- Cancelation
 --------------------------------------------------------------------------------
 
-export
-uncancelable : Async fs a -> Async fs a
-uncancelable (Sync x y)   = Sync U y
-uncancelable (Asnc x y)   = Asnc U y
-uncancelable (Start x y)  = Start U y
-uncancelable (Bind x y f) = Bind U y f
-uncancelable v            = v
-
-export
-cancelable : Async fs a -> Async fs a
-cancelable (Sync P y)   = Sync C y
-cancelable (Bind P y f) = Bind C y f
-cancelable (Asnc P y)   = Asnc C y
-cancelable (Start P y)  = Start C y
-cancelable v            = v
-
-export
-strictCancelable : Async fs a -> Async fs a
-strictCancelable (Sync _ y)   = Sync C y
-strictCancelable (Asnc _ y)   = Asnc C y
-strictCancelable (Start _ y)  = Start C y
-strictCancelable (Bind _ y f) = Bind C y f
-strictCancelable v            = v
+export %inline
+uncancelable : (Poll -> Async es a) -> Async es a
+uncancelable f = UC $ \n => f $ APoll n
 
 export
 canceled : Async es ()
@@ -173,11 +140,11 @@ self = Self
 
 export %inline
 cancelableAsync : ((Outcome es a -> IO ()) -> IO (Async [] ())) -> Async es a
-cancelableAsync f = Asnc P (map Just . f)
+cancelableAsync f = Asnc (map Just . f)
 
 export %inline
 async : ((Outcome es a -> IO ()) -> IO ()) -> Async es a
-async f = Asnc P (\o => f o $> Nothing)
+async f = Asnc (\o => f o $> Nothing)
 
 export
 lazy : Lazy a -> Async es a
@@ -197,9 +164,9 @@ joinResult f = join f >>= Term
 export
 cancel : Fiber es a -> Async fs ()
 cancel f =
-  uncancelable $ do
+  uncancelable $ \poll => do
     liftIO $ f.cancel
-    cancelable (ignore (join f))
+    poll (ignore (join f))
 
 ||| Runs an asynchronous computation in the background on a new fiber.
 |||
@@ -210,7 +177,7 @@ cancel f =
 ||| See also `cancel` and `join`.
 export %inline
 start : Async es a -> Async fs (Fiber es a)
-start as = Start P as
+start as = Start as
 
 ||| Asynchronously runs a computation on a new fiber.
 |||
@@ -248,7 +215,7 @@ injectIO = sync . map (mapFst inject)
 export
 handleErrors : (HSum es -> Async fs a) -> Async es a -> Async fs a
 handleErrors f x =
-  Bind U x $ \case
+  Bind x $ \case
     Succeeded x => Term $ Succeeded x
     Error x     => f x
     Canceled    => Term Canceled
@@ -284,7 +251,8 @@ liftError = handleErrors (pure . Left . project1) . map Right
 export
 guaranteeCase : Async es a -> (Outcome es a -> Async [] ()) -> Async es a
 guaranteeCase as f =
-  Bind U as $ \o => Bind U (uncancelable $ f o) (\_ => Term o)
+  uncancelable $ \poll => do
+    Bind (poll as) $ \o => Bind (f o) (\_ => Term o)
 
 export %inline
 onCancel : Async es a -> Async [] () -> Async es a
@@ -312,7 +280,7 @@ finally aa v = guaranteeCase aa (\_ => v)
 
 export %inline
 forget : Async es a -> Async [] ()
-forget as = Bind P as (\_ => pure ())
+forget as = Bind as (\_ => pure ())
 
 export
 consume : Async es a -> (Outcome es a -> IO ()) -> Async [] ()
@@ -325,8 +293,8 @@ bracketCase :
   -> ((a,Outcome es b) -> Async [] ())
   -> Async es b
 bracketCase acquire use release =
-  uncancelable $ do
-    res <- acquire
+  uncancelable $ \poll => do
+    res <- poll acquire
     guaranteeCase (use res) (\o => release (res,o))
 
 export %inline
@@ -416,7 +384,7 @@ runAsync as = runAsyncWith as (\_ => pure ())
 data Stack : (es,fs : List Type) -> (a,b : Type) -> Type where
   Nil  : Stack es es a a
   (::) :
-       (Cancelability, Outcome es a -> Async fs b)
+       (Outcome es a -> Async fs b)
     -> Stack fs gs b c
     -> Stack es gs a c
 
@@ -442,6 +410,8 @@ data FiberState : List Type -> Type -> Type where
   Suspended   :
        IORef (Maybe $ Outcome es a)
     -> (onCancel : Maybe $ Async [] ())
+    -> (cancelID : Nat)
+    -> (cancelStack : List Nat)
     -> Stack es fs a b
     -> FiberState fs b
 
@@ -519,6 +489,8 @@ covering run :
   -> Nat
   -> FiberImpl fs b
   -> Async es a
+  -> (cancelID : Nat)
+  -> (cancelStack : List Nat)
   -> Stack es fs a b
   -> IO ()
 
@@ -532,7 +504,7 @@ resume fbr = do
   -- a lock. The action is run after the mutex was released.
   run <- withLock fbr $ do
     readIORef fbr.state >>= \case
-      Suspended ref cncl s => do
+      Suspended ref cncl i cs s => do
         -- take over control and make sure no one else does
         writeIORef fbr.state Running
         ec <- readIORef fbr.ec
@@ -542,23 +514,23 @@ resume fbr = do
           -- mutable reference should be ready
           False => readIORef ref >>= \case
             -- all is well. let's continue
-            Just o  => pure (run @{ec} ec.limit fbr (Term o) s)
+            Just o  => pure (run @{ec} ec.limit fbr (Term o) i cs s)
             -- WTF?? This should not happen, so should we crash?
-            Nothing => writeIORef fbr.state (Suspended ref cncl s) $> pure ()
+            Nothing => writeIORef fbr.state (Suspended ref cncl i cs s) $> pure ()
 
           -- we were canceled so run the cancel hook (if any)
           -- otherwise, just continue and finish the uncancelable parts
           -- IMPORTANT: We will no longer wait for the callback to finish!
           True  => case cncl of
             Just c  =>
-              let f := Bind U c $ \_ => Term Canceled
-               in pure (run @{ec} ec.limit fbr f s)
-            Nothing => pure (run @{ec} ec.limit fbr (Term Canceled) s)
+              let f := uncancelable $ \_ => Bind c (\_ => Term Canceled)
+               in pure (run @{ec} ec.limit fbr f i cs s)
+            Nothing => pure (run @{ec} ec.limit fbr (Term Canceled) i cs s)
 
       Init as => do
         writeIORef fbr.state Running
         ec <- readIORef fbr.ec
-        pure (run @{ec} ec.limit fbr as [])
+        pure (run @{ec} ec.limit fbr as 0 [] [])
 
       -- we are already running or done, so don't interfere
       _  => pure (pure ())
@@ -568,13 +540,15 @@ covering suspend :
      FiberImpl fs b
   -> IORef (Maybe $ Outcome es a)
   -> Maybe (Async [] ())
+  -> (cancelID : Nat)
+  -> (cancelStack : List Nat)
   -> Stack es fs a b
   -> IO ()
-suspend fbr ref cncl stck = do
+suspend fbr ref cncl i cs s = do
   run <- withLock fbr $ do
     readIORef fbr.state >>= \case
-      ResultReady => writeIORef fbr.state (Suspended ref cncl stck) $> resume fbr
-      Running     => writeIORef fbr.state (Suspended ref cncl stck) $> pure ()
+      ResultReady => writeIORef fbr.state (Suspended ref cncl i cs s) $> resume fbr
+      Running     => writeIORef fbr.state (Suspended ref cncl i cs s) $> pure ()
       _           => pure (pure ())
   run
 
@@ -611,82 +585,90 @@ finalize fbr o = do
 
   run -- actually run the action we got
 
-set : Cancelability -> Async es a -> Async es a
-set x (Asnc y z)   = Asnc (x <+> y) z
-set x (Sync y z)   = Sync (x <+> y) z
-set x (Bind y z f) = Bind (x <+> y) z f
-set x (Start y z)  = Start (x <+> y) z
-set _ y            = y
+observeCancelation : List Nat -> FiberImpl es a -> IO Bool
+observeCancelation [] f = withLock f (readIORef f.canceled)
+observeCancelation _  _ = pure False
 
-observeCancelation : Cancelability -> FiberImpl es a -> IO Bool
-observeCancelation U _ = pure False
-observeCancelation _ f = withLock f (readIORef f.canceled)
+stopUC : List Nat -> List Nat
+stopUC (h::t) = t
+stopUC []     = []
 
 covering (.fiber) : FiberImpl es a -> Fiber es a
 f.fiber = MkFiber f.token (observeImpl f) (stopObservingImpl f) (cancelImpl f)
 
-run 0 fbr act stck = ec.submit (run ec.limit fbr act stck)
+run n fbr act i cs stck = do
+  False <- observeCancelation cs fbr | True => finalize fbr Canceled
+  case n of
+   0 => ec.submit (run ec.limit fbr act i cs stck)
+   S k => case act of
+     Term o => case stck of
+       f::fs => run k fbr (f o) i cs fs
+       []    => finalize fbr o
 
-run (S k) fbr (Bind c x f) stck = run k fbr (set c x) ((c,f)::stck)
+     Sync io => do
+       r <- io
+       run k fbr (Term $ toOutcome r) i cs stck
 
-run (S k) fbr (Term o) [] = finalize fbr o
+     Start as => do
+       child <- newFiber ec (Just $ AF fbr) as
+       ec.submit (resume child)
+       run k fbr (pure child.fiber) i cs stck
 
-run (S k) fbr (Term o) ((c,f)::t) = do
-  False <- observeCancelation c fbr | True => run k fbr (Term Canceled) t
-  run k fbr (set c $ f o) t
+     Shift ec2 => do
+       writeIORef fbr.ec ec2 >>
+       ec2.submit (run @{ec2} k fbr (pure ()) i cs stck)
 
-run (S k) fbr (Sync c io) stck = do
-  False <- observeCancelation c fbr | True => run k fbr (Term Canceled) stck
-  r     <- io
-  run k fbr (Term $ toOutcome r) stck
+     Self => run k fbr (pure fbr.token) i cs stck
 
-run (S k) fbr (Shift ec2) stck = do
-  writeIORef fbr.ec ec2 >>
-  ec2.submit (run @{ec2} k fbr (pure ()) stck)
+     Cancel => do
+       withLock fbr (writeIORef fbr.canceled True) >>
+       run k fbr (Term Canceled) i cs stck
 
-run (S k) fbr Cancel stck = do
-  withLock fbr (writeIORef fbr.canceled True) >>
-  run k fbr (Term Canceled) stck
+     GetEC => run k fbr (pure ec) i cs stck
 
-run (S k) fbr GetEC stck = run k fbr (pure ec) stck
+     Bind x f => run k fbr x i cs (f::stck)
 
-run (S k) fbr Self stck = run k fbr (pure fbr.token) stck
+     UC f => run k fbr (f i <* StopUC) (S i) (i::cs) stck
 
-run (S k) fbr (Start c as) stck = do
-  False <- observeCancelation c fbr | True => run k fbr (Term Canceled) stck
-  child <- newFiber ec (Just $ AF fbr) as
-  ec.submit (resume child)
-  run k fbr (Term $ Succeeded child.fiber) stck
+     APoll j x => case cs of
+       h::t =>
+          if h == j
+             then run k fbr (x <* ContUC h) i t stck
+             else run k fbr x i cs stck
+       []   => run k fbr x i [] stck
 
-run (S k) fbr (Asnc c reg) stck = do
-  False <- observeCancelation c fbr | True => run k fbr (Term Canceled) stck
-  ref <- newIORef Nothing
-  cnl <- reg $ \o => do
-    run <- withLock fbr $ do
-      -- test if we won the race and the value is yet unset
-      Nothing <- readIORef ref | _ => pure (pure ())
-      -- write the value and continue
-      writeIORef ref (Just o)
+     StopUC => run k fbr (pure ()) i (stopUC cs) stck
 
-      -- Check if the fiber has been canceled. If that's the case,
-      -- we are going to be left behind anyway, and we must abort.
-      -- (Because the fiber has been canceled, it's current state might
-      -- be "Running", and we must not mistake that for us winning the
-      -- concurrent race)
-      readIORef fbr.canceled >>= \case
-        True  => pure (pure ())
-        False =>
-          -- Check the current fiber state: If it is still at `Running`, we were
-          -- so quick (or synchronous) that the fiber had no time to get
-          -- suspended. In that case, the fiber will be suspended in a moment
-          -- and we inform it that the result is already here.
-          readIORef fbr.state >>= \case
-            -- We were quick and the fiber can continue immediately.
-            Running => writeIORef fbr.state ResultReady $> pure()
-            -- The fiber has already been suspended, so it can resume now.
-            _       => pure (resume fbr)
-    run
-  suspend fbr ref cnl stck
+     ContUC x => run k fbr (pure ()) i (x::cs) stck
+
+     Asnc reg => do
+       ref <- newIORef Nothing
+       cnl <- reg $ \o => do
+         run <- withLock fbr $ do
+           -- test if we won the race and the value is yet unset
+           Nothing <- readIORef ref | _ => pure (pure ())
+           -- write the value and continue
+           writeIORef ref (Just o)
+       
+           -- Check if the fiber has been canceled. If that's the case,
+           -- we are going to be left behind anyway, and we must abort.
+           -- (Because the fiber has been canceled, it's current state might
+           -- be "Running", and we must not mistake that for us winning the
+           -- concurrent race)
+           readIORef fbr.canceled >>= \case
+             True  => pure (pure ())
+             False =>
+               -- Check the current fiber state: If it is still at `Running`, we were
+               -- so quick (or synchronous) that the fiber had no time to get
+               -- suspended. In that case, the fiber will be suspended in a moment
+               -- and we inform it that the result is already here.
+               readIORef fbr.state >>= \case
+                 -- We were quick and the fiber can continue immediately.
+                 Running => writeIORef fbr.state ResultReady $> pure()
+                 -- The fiber has already been suspended, so it can resume now.
+                 _       => pure (resume fbr)
+         run
+       suspend fbr ref cnl i cs stck
 
 runAsyncWith @{ec} as cb = do
   fib <- newFiber ec Nothing as
