@@ -421,6 +421,8 @@ export
 joinOrDeadlock : Fiber es a -> Async es a
 joinOrDeadlock = joinWith cancelOrDeadlock
 
+||| Cancels the given fiber and awaits its termination
+||| be semantically blocking the calling fiber.
 export
 cancel : Fiber es a -> Async fs ()
 cancel f =
