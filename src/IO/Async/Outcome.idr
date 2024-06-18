@@ -26,6 +26,12 @@ toOutcome (Right v)   = Succeeded v
 toOutcome (Left errs) = Error errs
 
 export
+fromOutcome : Outcome es a -> Result es (Maybe a)
+fromOutcome (Succeeded v) = Right (Just v)
+fromOutcome Canceled      = Right Nothing
+fromOutcome (Error es)    = Left es
+
+export
 Functor (Outcome es) where
   map f (Succeeded v) = Succeeded (f v)
   map _ (Error v)     = Error v
