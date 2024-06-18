@@ -16,21 +16,15 @@ import System
 
 record Entry where
   constructor E
-  {0 res   : Type}
-  {0 errs  : List Type}
   rem      : Integer
-  val      : Lazy res
-  act      : Outcome errs res -> IO ()
+  act      : Bool -> IO ()
   canceled : MVar Bool
 
 cancel : Entry -> IO ()
-cancel e = e.act Canceled
+cancel e = e.act True
 
 send : Entry -> IO ()
-send e = do
-  readMVar e.canceled >>= \case
-    True  => e.act Canceled
-    False => e.act (Succeeded e.val)
+send e = readMVar e.canceled >>= e.act
 
 ||| State of a physical scheduler thread.
 export
@@ -80,17 +74,12 @@ stop w =
 
 ||| Enqueue an `IO` action to be processed by a worker thread.
 export %inline
-submit :
-     Scheduler
-  -> (ns : Nat)
-  -> Lazy a
-  -> (Outcome es a -> IO ())
-  -> IO (IO ())
-submit w d v f = do
+submit : Scheduler -> (ns : Nat) -> (Bool -> IO ()) -> IO (IO ())
+submit w d f = do
   withMutex w.lock $ do
-    False <- readIORef w.stopped | True => f (Canceled) $> pure ()
+    False <- readIORef w.stopped | True => f True $> pure ()
     var   <- newMVar False
-    modifyIORef w.entries (:< E (cast d) v f var)
+    modifyIORef w.entries (:< E (cast d) f var)
     conditionBroadcast w.cond
     pure $ writeMVar var True
 
@@ -152,14 +141,21 @@ process = process' True
 --------------------------------------------------------------------------------
 
 ||| Delay a computation by the given number of nanoseconds.
+|||
+||| Returns `True` if the delay was canceled.
 export
-delay : (s : Scheduler) => (nanos : Nat) -> Async es a -> Async es a
-delay nanos act = cancelableAsync (map liftIO . submit s nanos act) >>= id
+sleep' : (s : Scheduler) => (nanos : Nat) -> Async es Bool
+sleep' nanos = cancelableAsync (\cb => liftIO <$> submit s nanos (cb . Right))
+
+||| Delay a computation by the given number of nanoseconds.
+export %inline
+sleep : (s : Scheduler) => (nanos : Nat) -> Async es ()
+sleep = ignore . sleep'
 
 ||| Delay a computation by the given number of nanoseconds.
 export
-sleep : (s : Scheduler) => (nanos : Nat) -> Async es ()
-sleep nanos = delay nanos (pure ())
+delay : (s : Scheduler) => (nanos : Nat) -> Async es a -> Async es a
+delay nanos act = sleep nanos >> act
 
 ||| Converts a number of seconds to nanoseconds
 export

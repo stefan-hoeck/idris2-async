@@ -451,19 +451,21 @@ background = ignore . start
 ||| to stop your process as soon as the first of the conditions
 ||| occurs.
 export
-raceF : List (Async es (Fiber es a)) -> Async es a
--- raceF fs = do
---   t    <- self
---   fibs <- sequence fs
---   res  <- cancelableAsync (\cb => for_ fibs (\f => f.observe t cb) $> stop t fibs)
--- 
---   where
---     stop : Token -> List (Fiber es a) -> Async [] ()
---     stop t fibers = liftIO $ for_ fibers $ \f => f.stopObserving t
+raceF : List (Async es (Fiber es a)) -> Async es (Maybe a)
+raceF fs = do
+  t    <- self
+  fibs <- sequence fs
+  finally
+    (async (\cb => for_ fibs (\f => f.observe t (cb . fromOutcome))))
+    (stop t fibs)
+
+  where
+    stop : Token -> List (Fiber es a) -> Async [] ()
+    stop t fs = liftIO $ for_ fs $ \f => f.stopObserving t >> f.cancel
 
 ||| Alias for `raceF . traverse start`.
 export %inline
-race : (xs : List $ Async es a) -> Async es a
+race : (xs : List $ Async es a) -> Async es (Maybe a)
 race = raceF . map start
 
 injections : All f ts -> All (\t => (v : t) -> HSum ts) ts
@@ -473,7 +475,7 @@ injections (x :: xs) = Here :: mapProperty (There .) (injections xs)
 ||| Runs a heterogeneous list of asynchronous computations in parallel,
 ||| keeping only the one that finishes first.
 export %inline
-raceAny : All (Async es) ts -> Async es (HSum ts)
+raceAny : All (Async es) ts -> Async es (Maybe $ HSum ts)
 raceAny xs = race . forget $ hzipWith map (injections xs) xs
 
 ||| Accumulates the results of the given heterogeneous list of
@@ -571,22 +573,14 @@ data FiberState : List Type -> Type -> Type where
 prepend : Async es a -> Stack es fs a b -> Stack [] fs () b
 prepend act s = Cont (const act) :: s
 
--- An existential (non-parameterized) wrapper around a `FiberImpl es a`
-data AnyFiber : Type
-
 record FiberImpl (es : List Type) (a : Type) where
   constructor FI
   ec        : IORef ExecutionContext
   mutex     : Mutex
-  parent    : Maybe AnyFiber
   token     : Token
   callbacks : IORef (SortedMap Token (Outcome es a -> IO ()))
-  children  : IORef (SortedMap Token AnyFiber)
   canceled  : IORef Bool
   state     : IORef (FiberState es a)
-
-data AnyFiber : Type where
-  AF : FiberImpl es a -> AnyFiber
 
 withLock : FiberImpl es a -> IO b -> IO b
 withLock fbr f = do
@@ -595,41 +589,21 @@ withLock fbr f = do
   mutexRelease fbr.mutex
   pure res
 
-addChild : Maybe AnyFiber -> FiberImpl fs b -> IO ()
-addChild Nothing       _ = pure ()
-addChild (Just $ AF q) y =
-  withLock q $ modifyIORef q.children (insert y.token (AF y))
-
-removeChild : FiberImpl es a -> Token -> IO ()
-removeChild fbr tk = withLock fbr (modifyIORef fbr.children $ delete tk)
-
-newFiber :
-     ExecutionContext
-  -> (parent : Maybe AnyFiber)
-  -> (as     : Async es a)
-  -> IO (FiberImpl es a)
-newFiber ec p as = do
-  fbr <- [| FI
-              (newIORef ec)
-              makeMutex
-              (pure p)
-              token
-              (newIORef empty)
-              (newIORef empty)
-              (newIORef False)
-              (newIORef $ Init as)
-         |]
-  addChild p fbr
-  pure fbr
+newFiber : ExecutionContext -> (as : Async es a) -> IO (FiberImpl es a)
+newFiber ec as =
+  [| FI
+       (newIORef ec)
+       makeMutex
+       token
+       (newIORef empty)
+       (newIORef False)
+       (newIORef $ Init as)
+  |]
 
 stopObservingImpl : FiberImpl es a -> Token -> IO ()
 stopObservingImpl fbr tk = withLock fbr $ modifyIORef fbr.callbacks (delete tk)
 
-observeImpl :
-     FiberImpl es a
-  -> Token
-  -> (Outcome es a -> IO ())
-  -> IO ()
+observeImpl : FiberImpl es a -> Token -> (Outcome es a -> IO ()) -> IO ()
 observeImpl fbr tk cb = do
   run <- withLock fbr $
     readIORef fbr.state >>= \case
@@ -709,15 +683,8 @@ finalize fbr o = do
     cbs <- readIORef fbr.callbacks
     writeIORef fbr.callbacks empty
 
-    -- Read and empty the children...
-    chl <- readIORef fbr.children
-    writeIORef fbr.children empty
-
     -- ...and invoke all callbacks and cancel all children
-    pure $ do
-      for_ fbr.parent (\(AF x) => removeChild x fbr.token)
-      for_ cbs (\cb => cb o)
-      for_ chl (\(AF x) => cancelImpl x)
+    pure $ for_ cbs (\cb => cb o)
 
   run -- actually run the action we got
 
@@ -767,7 +734,7 @@ run n fbr act m stck = do
       run k fbr (Term r) m stck
 
     Start as => do
-      child <- newFiber ec (Just $ AF fbr) as
+      child <- newFiber ec as
       ec.submit (resume child Nothing)
       run k fbr (pure child.fiber) m stck
     
@@ -816,7 +783,7 @@ run n fbr act m stck = do
       act
 
 runAsyncWith @{ec} as cb = do
-  fib <- newFiber ec Nothing as
+  fib <- newFiber ec as
   tk  <- token
   observeImpl fib tk cb
   ec.submit (resume fib Nothing)

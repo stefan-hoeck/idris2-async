@@ -51,7 +51,7 @@ export
 onEvent : Event a -> Async es a
 onEvent ev =
   cancelableAsync $ \cb =>
-    listen ev (cb . Succeeded) $> liftIO (stopListening ev)
+    listen ev (cb . Right) $> liftIO (stopListening ev)
 
 public export
 0 Buffer : Type -> Type

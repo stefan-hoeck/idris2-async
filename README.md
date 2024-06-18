@@ -145,8 +145,8 @@ countParallel = do
   putStrLn "Concurrent countdown"
   f1 <- start $ countSeconds 2
   f2 <- start $ countMillis 10
-  joinResult f1
-  joinResult f2
+  joinOrDeadlock f1
+  joinOrDeadlock f2
 ```
 
 If you try this example by running `main` with the `"par"` argument, you will
@@ -196,8 +196,9 @@ until the faster of the two terminates:
 
 ```idris
 raceParallel : Scheduler => Async [] ()
-raceParallel =
-  putStrLn "Racing countdowns" >> race [ countSeconds 10000, countMillis 10 ]
+raceParallel = do
+  putStrLn "Racing countdowns" 
+  ignore $ race [ countSeconds 10000, countMillis 10 ]
 ```
 
 Running this with the `"race"` command-line argument gives the
@@ -242,7 +243,7 @@ fibo (S $ S k) = fibo k + fibo (S k)
 sumFibos : Nat -> Nat -> Async [] ()
 sumFibos nr fib = do
   vs <- parTraverse (\n => lazy (fibo n)) (replicate nr fib)
-  printLn (sum vs)
+  printLn (maybe 0 sum vs)
 ```
 
 You can try this by running the example application like so:
@@ -291,7 +292,7 @@ we print ever result to get an idea of the runtime behavior:
 sumVisFibos : Nat -> Nat -> Async [] ()
 sumVisFibos nr fib = do
   vs <- parTraverse visFibo (replicate nr fib)
-  printLn (sum vs)
+  printLn (maybe 0 sum vs)
 
   where
     visFibo : Nat -> Async [] Nat
