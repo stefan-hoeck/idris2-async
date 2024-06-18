@@ -341,6 +341,7 @@ run threads args = do
   app threads $ act @{sc} args
   stop sc
   threadWait t
+  putStrLn "All threads stopped"
 
 covering
 main : IO ()

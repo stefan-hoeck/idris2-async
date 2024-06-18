@@ -55,6 +55,7 @@ namespace WorkST
   submit : WorkST -> IO () -> IO ()
   submit w v = do
     withMutex w.lock $ do
+      False <- readIORef w.stopped | True => pure ()
       modifyIORef w.queue (flip enqueue v)
       conditionBroadcast w.cond
 
