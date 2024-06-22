@@ -9,6 +9,7 @@ depends = base >= 0.7.0
 
 modules = IO.Async
         , IO.Async.Event
+        , IO.Async.ExecutionContext
         , IO.Async.Fiber
         , IO.Async.MVar
         , IO.Async.Outcome
