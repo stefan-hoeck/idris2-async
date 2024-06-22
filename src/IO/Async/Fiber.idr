@@ -114,6 +114,10 @@ data Async : (es : List Type) -> Type -> Type where
   -- Returns the ID token of the current fiber
   Self   : Async es Token
 
+  -- Cede control to another fiber by resubmitting the current
+  -- computation to the execution context.
+  Cede   : Async es ()
+
   -- A wrapped asynchronous computation with potential cancel
   -- function.
   Asnc   : ((Result es a -> IO ()) -> IO AsyncHandler) -> Async es a
@@ -208,6 +212,12 @@ blockingAsync f = Asnc (\o => f o $> Wait)
 export
 lazy : Lazy a -> Async es a
 lazy v = async (\f => f $ Right v)
+
+||| Cede control to a different fiber by resubmitting the current
+||| computation to the execution context.
+export %inline
+cede : Async es ()
+cede = Cede
 
 --------------------------------------------------------------------------------
 -- Cancelation
@@ -741,6 +751,8 @@ run n fbr act m stck = do
     Shift ec2 => do
       writeIORef fbr.ec ec2 >>
       ec2.submit (run @{ec2} k fbr (pure ()) m stck)
+
+    Cede => ec.submit (run ec.limit fbr (pure ()) m stck)
 
     Self => run k fbr (pure fbr.token) m stck
 
