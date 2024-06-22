@@ -1,0 +1,11 @@
+package async-test
+version = 0.1.0
+authors = "stefan-hoeck"
+
+depends = async
+
+sourcedir = "src"
+
+executable = "async-test"
+
+main = Test.Async.Main
