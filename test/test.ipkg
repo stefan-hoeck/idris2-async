@@ -3,6 +3,8 @@ version = 0.1.0
 authors = "stefan-hoeck"
 
 depends = async
+        , pretty-show
+        , prettier-ansi
 
 sourcedir = "src"
 
