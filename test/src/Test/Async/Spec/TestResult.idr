@@ -38,7 +38,7 @@ data TestTree : Type where
   Node : (name : String) -> List TestTree -> TestTree
   Leaf : (desc : String) -> Test -> TestTree
 
-export
+public export
 data Pre : Type where
   It : Pre
   Desc : String -> Pre

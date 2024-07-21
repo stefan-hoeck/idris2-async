@@ -18,7 +18,7 @@ data Markup =
   | SuccessIcon
   | SuccessText
   | Summary
-  | Title
+  | Title Nat
   | DiffRemoved
   | DiffAdded
   | NoMarkup
@@ -30,7 +30,8 @@ color c = [SetForeground c]
 
 toAnsi : Markup -> List SGR
 toAnsi Summary      = color Blue
-toAnsi Title        = color Blue
+toAnsi (Title 0)    = color Blue
+toAnsi (Title _)    = color BrightBlue
 toAnsi DiffAdded    = color Green
 toAnsi DiffRemoved  = color Red
 toAnsi FailedIcon   = color BrightRed
@@ -105,8 +106,11 @@ report desc Success          = succeeded desc
 export
 summary : (te : TestEnv) => (ts,fs : Nat) -> IO ()
 summary ts 0 = printDoc $ markup Summary (line "\{testCount ts} passed")
-summary ts n = printDoc $ markup FailedText (line "\{testCount ts} failed")
+summary ts n =
+  printDoc $ markup FailedText (line "\{show n} of \{testCount ts} failed")
 
 export
 printName : (te : TestEnv) => String -> IO ()
-printName str = printDoc . markup Title . vsep $ textLines str
+printName str = do
+  n <- readIORef te.depth
+  printDoc . markup (Title n) . vsep $ textLines str

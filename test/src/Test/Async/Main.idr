@@ -55,52 +55,47 @@ lifted = pure val
 liftedAsync : Async [] Nat
 liftedAsync = async $ \cb => cb (Right val)
 
+compute : Nat -> Nat -> Nat -> Nat
+compute x y z = (x `minus` y) + z
+
+applied : Async [] Nat
+applied = [| compute lifted liftedAsync lifted |]
+
+fromDo : Async [] Nat
+fromDo = do
+  x <- lifted
+  y <- liftedAsync
+  z <- lifted
+  pure (compute x y z)
+
 square : Nat -> Nat
 square x = x * x
+
+covering
+coreSpecs : String -> Async [] Nat -> List FlatSpecInstr
+coreSpecs str act =
+  [ Desc str `should` "be returned unchanged" `at` (assert act val)
+  ,   it `should` "be returned unchanged after mapping with id" `at`
+        (assert (map id act) val)
+  ,   it `should` "be returned unchanged after binding with pure" `at`
+        (assert (act >>= pure) val)
+  ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
+        (assert (act >>= \x => cede >> pure x) val)
+  ,   it `should` "be unchanged after a short delay" `at`
+        (assert (delay 100.ms act) val)
+  ,   it `should` "be unchanged after `cede`" `at` (assert (cede >> act) val)
+  ,   it `should` "be squared after mapping with square" `at`
+        (assert (map square act) (square val))
+  ,   it `should` "be squared after binding with `pure . square`" `at`
+        (assert (act >>= pure . square) (square val))
+  ]
 
 covering
 main : IO ()
 main =
   test $ 
-    flatSpec "Async Spec"
-      [ "a natural number lifted with pure" `should` "be returned unchanged" `at`
-            (assert lifted val)
-      ,   it `should` "be returned unchanged after mapping with id" `at`
-            (assert (map id lifted) val)
-      ,   it `should` "be returned unchanged after binding with pure" `at`
-            (assert (lifted >>= pure) val)
-      ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
-            (assert (lifted >>= \x => cede >> pure x) val)
-      ,   it `should` "be unchanged by a short delay" `at`
-            (assert (delay 100.ms lifted) val)
-      ,   it `should` "be squared after mapping with square" `at`
-            (assert (map square lifted) (square val))
-      ,   it `should` "be squared after binding with `pure . square`" `at`
-            (assert (lifted >>= pure . square) (square val))
-
-      , "a natural number lifted with async" `should` "be returned unchanged" `at`
-            (assert lifted val)
-      ,   it `should` "be returned unchanged after mapping with id" `at`
-            (assert (map id lifted) val)
-      ,   it `should` "be returned unchanged after binding with pure" `at`
-            (assert (lifted >>= pure) val)
-      ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
-            (assert (lifted >>= \x => cede >> pure x) val)
-      ,   it `should` "be unchanged by a short delay" `at`
-            (assert (delay 100.ms lifted) val)
-      ,   it `should` "be squared after mapping with square" `at`
-            (assert (map square lifted) (square val))
-      ,   it `should` "be squared after binding with `pure . square`" `at`
-            (assert (lifted >>= pure . square) (square val))
-      ]
-    -- Node "async"
-    --   [ Node "binds"
-    --       [ Leaf
-    --           "chaining computations sequences effects"
-    --           (assert (run $ tick >> tack >> tock) [Tick,Tack,Tock])
-    --       , Leaf
-    --           "replicating an effect runs it several times"
-    --           (assert (run $ replicateM_ 6 tick) [Tick,Tick,Tick,Tick,Tick,Tick])
-
-    --       ]
-    --   ]
+    flatSpec "Async Spec" $
+      coreSpecs "a natural number lifted with pure" lifted ++
+      coreSpecs "a natural number lifted with async" liftedAsync ++
+      coreSpecs "a natural number from idiom brackets" applied ++
+      coreSpecs "a natural number from `do` notation" fromDo
