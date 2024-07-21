@@ -3,6 +3,7 @@ module Test.Async.Main
 import Data.IORef
 import Derive.Prelude
 import Test.Async.Spec
+import IO.Async.Sleep
 
 %language ElabReflection
 %default total
@@ -70,6 +71,8 @@ main =
             (assert (lifted >>= pure) val)
       ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
             (assert (lifted >>= \x => cede >> pure x) val)
+      ,   it `should` "be unchanged by a short delay" `at`
+            (assert (delay 100.ms lifted) val)
       ,   it `should` "be squared after mapping with square" `at`
             (assert (map square lifted) (square val))
       ,   it `should` "be squared after binding with `pure . square`" `at`
@@ -83,6 +86,8 @@ main =
             (assert (lifted >>= pure) val)
       ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
             (assert (lifted >>= \x => cede >> pure x) val)
+      ,   it `should` "be unchanged by a short delay" `at`
+            (assert (delay 100.ms lifted) val)
       ,   it `should` "be squared after mapping with square" `at`
             (assert (map square lifted) (square val))
       ,   it `should` "be squared after binding with `pure . square`" `at`
