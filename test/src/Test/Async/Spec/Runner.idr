@@ -20,7 +20,7 @@ toBool (Just s) =
 
 covering
 run : TestEnv => TestTree -> IO ()
-run (Leaf desc x)  = printDesc desc >> x >>= report
+run (Leaf desc x)  = x >>= report desc
 run (Node name xs) = do
   printName name 
   incDepth

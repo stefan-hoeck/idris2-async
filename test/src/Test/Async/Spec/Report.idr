@@ -17,7 +17,8 @@ data Markup =
   | FailedText
   | SuccessIcon
   | SuccessText
-  | AnnotationValue
+  | Summary
+  | Title
   | DiffRemoved
   | DiffAdded
   | NoMarkup
@@ -28,14 +29,15 @@ color : Color -> List SGR
 color c = [SetForeground c]
 
 toAnsi : Markup -> List SGR
-toAnsi AnnotationValue = color Magenta
-toAnsi DiffAdded       = color Green
-toAnsi DiffRemoved     = color Red
-toAnsi FailedIcon      = color BrightRed
-toAnsi FailedText      = color BrightRed
-toAnsi SuccessIcon     = color Green
-toAnsi SuccessText     = color Green
-toAnsi NoMarkup        = []
+toAnsi Summary      = color Blue
+toAnsi Title        = color Blue
+toAnsi DiffAdded    = color Green
+toAnsi DiffRemoved  = color Red
+toAnsi FailedIcon   = color BrightRed
+toAnsi FailedText   = color BrightRed
+toAnsi SuccessIcon  = color Green
+toAnsi SuccessText  = color Green
+toAnsi NoMarkup     = []
 
 testCount : Nat -> String
 testCount 1 = "1 test"
@@ -77,33 +79,34 @@ parameters {auto te : TestEnv}
     putStr $ renderDoc $
       indent (dpt * 2) doc
 
-export
-fail : (te : TestEnv) => Maybe Diff -> String -> IO ()
-fail md msg = Prelude.do
-  addFailure
-  addTest
-  printDoc $ vsep (textLines msg ++ maybe [] diff md)
+  export
+  fail : (desc : String) -> Maybe Diff -> String -> IO ()
+  fail desc md msg = Prelude.do
+    addFailure
+    addTest
+    printDoc . vsep $
+      [ icon FailedIcon '✗' (markup FailedText (vsep $ textLines desc))
+      , indent 2 $ vsep $
+          map (markup FailedText) (textLines msg) ++ maybe [] diff md
+      ]
 
 export
-succeeded : (te : TestEnv) => String -> IO ()
-succeeded msg = do
+succeeded : (te : TestEnv) => (desc : String) -> IO ()
+succeeded desc = do
   addTest
-  printDoc (line msg)
+  printDoc $
+    icon SuccessIcon '✓' (markup SuccessText (vsep $ textLines desc))
 
 export
-report : (te : TestEnv) => TestResult -> IO ()
-report (Failure md msg) = fail md msg
-report Success          = succeeded "passed"
+report : (te : TestEnv) => (desc : String) -> TestResult -> IO ()
+report desc (Failure md msg) = fail desc md msg
+report desc Success          = succeeded desc
 
 export
 summary : (te : TestEnv) => (ts,fs : Nat) -> IO ()
-summary ts 0 = putStrLn "\{testCount ts} passed"
-summary ts n = putStrLn "\{show n} of \{testCount ts} failed"
+summary ts 0 = printDoc $ markup Summary (line "\{testCount ts} passed")
+summary ts n = printDoc $ markup FailedText (line "\{testCount ts} failed")
 
 export
 printName : (te : TestEnv) => String -> IO ()
-printName str = printDoc $ vsep (textLines str)
-
-export
-printDesc : (te : TestEnv) => String -> IO ()
-printDesc str = printDoc $ vsep (textLines str)
+printName str = printDoc . markup Title . vsep $ textLines str

@@ -51,6 +51,9 @@ val = 127
 lifted : Async [] Nat
 lifted = pure val
 
+liftedAsync : Async [] Nat
+liftedAsync = async $ \cb => cb (Right val)
+
 square : Nat -> Nat
 square x = x * x
 
@@ -61,10 +64,29 @@ main =
     flatSpec "Async Spec"
       [ "a natural number lifted with pure" `should` "be returned unchanged" `at`
             (assert lifted val)
-      ,   it `should` "be returned unchanged after mapping over id" `at`
+      ,   it `should` "be returned unchanged after mapping with id" `at`
             (assert (map id lifted) val)
-      ,   it `should` "be squared after mapping over square" `at`
+      ,   it `should` "be returned unchanged after binding with pure" `at`
+            (assert (lifted >>= pure) val)
+      ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
+            (assert (lifted >>= \x => cede >> pure x) val)
+      ,   it `should` "be squared after mapping with square" `at`
             (assert (map square lifted) (square val))
+      ,   it `should` "be squared after binding with `pure . square`" `at`
+            (assert (lifted >>= pure . square) (square val))
+
+      , "a natural number lifted with async" `should` "be returned unchanged" `at`
+            (assert lifted val)
+      ,   it `should` "be returned unchanged after mapping with id" `at`
+            (assert (map id lifted) val)
+      ,   it `should` "be returned unchanged after binding with pure" `at`
+            (assert (lifted >>= pure) val)
+      ,   it `should` "be returned unchanged after binding with `\\x => cede >> pure x`" `at`
+            (assert (lifted >>= \x => cede >> pure x) val)
+      ,   it `should` "be squared after mapping with square" `at`
+            (assert (map square lifted) (square val))
+      ,   it `should` "be squared after binding with `pure . square`" `at`
+            (assert (lifted >>= pure . square) (square val))
       ]
     -- Node "async"
     --   [ Node "binds"
