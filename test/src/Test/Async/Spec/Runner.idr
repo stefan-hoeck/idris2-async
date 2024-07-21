@@ -39,5 +39,3 @@ test tree = do
   if fs > 0
      then exitFailure
      else exitSuccess
-
-

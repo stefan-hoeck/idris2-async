@@ -74,7 +74,7 @@ parameters {auto te : TestEnv}
   printDoc : Doc te.layout -> IO ()
   printDoc doc = do
     dpt <- readIORef te.depth
-    putStrLn $ renderDoc $
+    putStr $ renderDoc $
       indent (dpt * 2) doc
 
 export
