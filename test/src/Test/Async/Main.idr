@@ -45,18 +45,35 @@ run f = do
   f @{ref}
   map (<>> []) (readIORef ref)
 
+val : Nat
+val = 127
+
+lifted : Async [] Nat
+lifted = pure val
+
+square : Nat -> Nat
+square x = x * x
+
 covering
 main : IO ()
 main =
-  test $
-    Node "async"
-      [ Node "binds"
-          [ Leaf
-              "chaining computations sequences effects"
-              (assert (run $ tick >> tack >> tock) [Tick,Tack,Tock])
-          , Leaf
-              "replicating an effect runs it several times"
-              (assert (run $ replicateM_ 6 tick) [Tick,Tick,Tick,Tick,Tick,Tick])
-
-          ]
+  test $ 
+    flatSpec "Async Spec"
+      [ "a natural number lifted with pure" `should` "be returned unchanged" `at`
+            (assert lifted val)
+      ,   it `should` "be returned unchanged after mapping over id" `at`
+            (assert (map id lifted) val)
+      ,   it `should` "be squared after mapping over square" `at`
+            (assert (map square lifted) (square val))
       ]
+    -- Node "async"
+    --   [ Node "binds"
+    --       [ Leaf
+    --           "chaining computations sequences effects"
+    --           (assert (run $ tick >> tack >> tock) [Tick,Tack,Tock])
+    --       , Leaf
+    --           "replicating an effect runs it several times"
+    --           (assert (run $ replicateM_ 6 tick) [Tick,Tick,Tick,Tick,Tick,Tick])
+
+    --       ]
+    --   ]
