@@ -4,27 +4,11 @@ import Data.IORef
 import Data.Nat
 import Data.SortedMap
 import System.Concurrency
+import IO.Async.ExecutionContext
 import IO.Async.Outcome
 import IO.Async.Token
 
 %default total
-
---------------------------------------------------------------------------------
--- Execution Context
---------------------------------------------------------------------------------
-
-||| A context for submitting and running commands asynchronously.
-public export
-record ExecutionContext where
-  [noHints]
-  constructor EC
-  tokenGen : TokenGen
-  submit   : IO () -> IO ()
-  limit    : Nat
-
-export %inline %hint
-ecToTokenGen : ExecutionContext => TokenGen
-ecToTokenGen @{ec} = ec.tokenGen
 
 --------------------------------------------------------------------------------
 -- Fiber
@@ -113,6 +97,10 @@ data Async : (es : List Type) -> Type -> Type where
 
   -- Returns the ID token of the current fiber
   Self   : Async es Token
+
+  -- Cede control to another fiber by resubmitting the current
+  -- computation to the execution context.
+  Cede   : Async es ()
 
   -- A wrapped asynchronous computation with potential cancel
   -- function.
@@ -208,6 +196,12 @@ blockingAsync f = Asnc (\o => f o $> Wait)
 export
 lazy : Lazy a -> Async es a
 lazy v = async (\f => f $ Right v)
+
+||| Cede control to a different fiber by resubmitting the current
+||| computation to the execution context.
+export %inline
+cede : Async es ()
+cede = Cede
 
 --------------------------------------------------------------------------------
 -- Cancelation
@@ -715,7 +709,7 @@ doCancel n f _ s = run n f (pure ()) 1 (hooks s)
 run n fbr act m stck = do
   cncld <- withLock fbr (readIORef fbr.canceled)
   False <- pure (cncld && m == 0) | True => doCancel n fbr act stck
-  S k   <- pure n | 0 => ec.submit (run ec.limit fbr act m stck)
+  S k   <- pure n | 0 => ec.submit False (run ec.limit fbr act m stck)
   case act of
     Bind x f => run k fbr x m (Cont f :: stck)
 
@@ -735,12 +729,14 @@ run n fbr act m stck = do
 
     Start as => do
       child <- newFiber ec as
-      ec.submit (resume child Nothing)
+      ec.submit True (resume child Nothing)
       run k fbr (pure child.fiber) m stck
     
     Shift ec2 => do
       writeIORef fbr.ec ec2 >>
-      ec2.submit (run @{ec2} k fbr (pure ()) m stck)
+      ec2.submit False (run @{ec2} k fbr (pure ()) m stck)
+
+    Cede => ec.submit False (run ec.limit fbr (pure ()) m stck)
 
     Self => run k fbr (pure fbr.token) m stck
 
@@ -786,4 +782,4 @@ runAsyncWith @{ec} as cb = do
   fib <- newFiber ec as
   tk  <- token
   observeImpl fib tk cb
-  ec.submit (resume fib Nothing)
+  ec.submit False (resume fib Nothing)

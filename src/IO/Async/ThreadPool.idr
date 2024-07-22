@@ -4,6 +4,7 @@ import public Data.Nat
 import Data.IORef
 import Data.Queue
 import Data.Vect
+import IO.Async.ExecutionContext
 import IO.Async.Fiber
 import IO.Async.MVar
 import IO.Async.Outcome
@@ -134,7 +135,7 @@ namespace ThreadPool
 ||| Create an execution context from a thread pool.
 export %inline
 ec : {n : _} -> ThreadPool (S n) -> (limit : Nat) -> ExecutionContext
-ec wp limit = EC wp.tg (ThreadPool.submit wp) limit
+ec wp limit = EC wp.tg (const $ ThreadPool.submit wp) limit
 
 ||| Run an asyncrhonous application on a thread pool with
 ||| `n` physical threads.

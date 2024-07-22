@@ -2,6 +2,7 @@
 type = "local"
 path = "."
 ipkg = "async.ipkg"
+test = "test/test.ipkg"
 
 [custom.all.async-docs]
 type = "local"
