@@ -5,7 +5,7 @@ with proper error handling in Idris2. Depending on the backend you
 use, this also offers true parallelism, that is, computations running in
 parallel on multicore systems. It was strongly inspired by the
 [cats-effect](https://typelevel.org/cats-effect/) library written in
-Scala, although it is by far not as battle hardened as is antetype.
+Scala, although it is by far not as battle hardened as its antetype.
 
 This is a literate Idris source file, so you can compile and run it.
 It is recommended to use [pack](https://github.com/stefan-hoeck/idris2-pack)
@@ -23,6 +23,7 @@ module README
 import Data.List
 import IO.Async
 import IO.Async.ThreadPool
+import IO.Async.Signal
 import IO.Async.Sleep
 import System
 
@@ -59,10 +60,16 @@ Before we look at a first example, we need to get our terminology straight.
   always implies concurrency, but concurrency not necessarily implies
   parallelism. For instance, on JavaScript - which is single-threaded -
   computations can be run concurrently but obviously not in parallel.
+* fiber: A lightweight computational thread (sometimes also called a *green thread*)
+  on which effectful computations run sequentially. Unlike operating
+  system threads, fibers are lightweight and not a scarce resource.
+* semantic block: A fiber is said to be *semantically blocked*, if
+  its sequence of computations has (possibly temporarily) come to a halt
+  without actually blocking the operating system thread it runs on.
 
-In order to demonstrate the difference, we define two countdowns:
-One for counting down seconds, the other counting down milliseconds
-(in 100 ms steps):
+In order to demonstrate some of this library's capabilities,
+we define two countdowns: One for counting down seconds,
+the other counting down milliseconds (in 100 ms steps):
 
 ```idris
 countSeconds : Nat -> Async [] ()
@@ -91,7 +98,7 @@ when the current one has finished with a result.
 Note, however, that in the examples above there is not blocking of
 an operating system thread, even though we call `sleep`. I will explain this in
 greater detail later when we talk about `Fiber`s, but for now suffice
-to say that the `sleep` used above (from module `IO.Async.Scheduler.sleep`)
+to say that the `sleep` used above (from module `IO.Async.Sleep.sleep`)
 is more powerful than `System.sleep` from the base library although
 they semantically do the same thing: They stop a sequence of computations
 for a predefined amount of time.
@@ -136,7 +143,7 @@ Why should we wait for the first to finish before starting the second when
 they are completely unrelated? Let's try and run them concurrently as we would
 with `Prelude.fork`. The primitive to do this is called `start`, and like
 `fork`, it returns a value that we can use to wait for the computation
-to finish using `joinResult`. Here's the code:
+to finish using `wait`. Here's the code:
 
 
 ```idris
@@ -145,8 +152,8 @@ countParallel = do
   putStrLn "Concurrent countdown"
   f1 <- start $ countSeconds 2
   f2 <- start $ countMillis 10
-  joinOrDeadlock f1
-  joinOrDeadlock f2
+  wait f1
+  wait f2
 ```
 
 If you try this example by running `main` with the `"par"` argument, you will
@@ -192,32 +199,37 @@ terminates. This would allow us to - for instance - run a
 long-running computation until a timeout fires, in which case
 we might want to end with an error. We will look at that example
 later on. For now, let's just run our countdowns concurrently
-until the faster of the two terminates:
+until the faster of the two terminates. To spice this up a bit,
+we also add a signal handler so we can abort the program by
+entering `Ctrl-c` at the terminal:
 
 ```idris
+onSigErr : SignalError -> Async [] ()
+onSigErr (Error n) = putStrLn "Encountered signal error: \{show n}"
+
+covering
 raceParallel : Async [] ()
 raceParallel = do
-  putStrLn "Racing countdowns" 
-  ignore $ race [ countSeconds 10000, countMillis 10 ]
+  putStrLn "Racing countdowns"
+  ignore $ race
+    [ countSeconds 10000
+    , countMillis 50
+    , handle [onSigErr] $ blockTill SigINT >> putStrLn "interrupted by SigINT"
+    ]
 ```
 
 Running this with the `"race"` command-line argument gives the
-following output:
+following output, unless it is interrupted by `Ctrl-c`:
 
 ```sh
 > pack -o async exec docs/src/README.md race
 Racing countdowns
-1000 ms left
-2 s left
-900 ms left
-800 ms left
-700 ms left
-600 ms left
-500 ms left
-400 ms left
-300 ms left
-200 ms left
+10000 s left
+5000 ms left
+4900 ms left
+...
 100 ms left
+9995 s left
 Millisecond counter done.
 ```
 
@@ -283,7 +295,7 @@ threads to process the enqueued `IO` actions. If the number of
 threads is greater than one, we get true parallelism when processing
 more than one fiber at a time.
 
-Here is a way to visualize this behavior. We again compute Fibonacci
+Here is a way of visualizing this behavior. We again compute Fibonacci
 numbers, but this time we make sure that the numbers we compute are
 large enough to take hundreds of milliseconds at the least. In addition,
 we print ever result to get an idea of the runtime behavior:
@@ -323,6 +335,7 @@ This final sections only shows the `main` functions and a few utilities
 used to run the examples in this introduction.
 
 ```idris
+covering
 act : List String -> Async [] ()
 act ("par"   :: _) = countParallel
 act ("par2"  :: _) = countParallel2
@@ -337,7 +350,7 @@ covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
 run threads args = do
   app threads $ act args
-  putStrLn "All threads stopped"
+  usleep 100
 
 covering
 main : IO ()
