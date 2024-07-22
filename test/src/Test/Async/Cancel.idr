@@ -8,6 +8,7 @@ import Test.Async.Spec
 %default total
 
 data Event : Type where
+  Outer    : Event
   Tick     : Event
   Tock     : Event
   Tack     : Event
@@ -51,7 +52,6 @@ parameters {auto ref : IORef (SnocList Event)}
     fbr <- start (onCnclB o $ tickTackTock False m)
     cede
     cancel fbr
-    ignore $ join fbr
 
 run : (IORef (SnocList Event) => Async [] ()) -> Async [] (List Event)
 run f = do
@@ -79,6 +79,8 @@ instrs =
       (assert (run $ outer True False) [Tick,Canceled])
   , it `should` "finish a masked region after cancelation from the outside" `at`
       (assert (run $ outer True True) [Tick,Tack,Canceled])
+  , it `should` "block while waiting for termination of a fiber it canceled" `at`
+      (assert (run $ outer True True >> fire Outer) [Tick,Tack,Canceled,Outer])
   ]
 
 export covering

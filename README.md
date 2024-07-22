@@ -23,7 +23,7 @@ module README
 import Data.List
 import IO.Async
 import IO.Async.ThreadPool
-import IO.Async.Scheduler
+import IO.Async.Sleep
 import System
 
 %default total
@@ -65,14 +65,14 @@ One for counting down seconds, the other counting down milliseconds
 (in 100 ms steps):
 
 ```idris
-countSeconds : Scheduler => Nat -> Async [] ()
+countSeconds : Nat -> Async [] ()
 countSeconds 0     = putStrLn "Second counter done."
 countSeconds (S k) = do
   putStrLn "\{show $ S k} s left"
   sleep 1.s
   countSeconds k
 
-countMillis : Scheduler => Nat -> Async [] ()
+countMillis : Nat -> Async [] ()
 countMillis 0     = putStrLn "Millisecond counter done."
 countMillis (S k) = do
   putStrLn "\{show $ S k * 100} ms left"
@@ -99,7 +99,7 @@ for a predefined amount of time.
 Let's try and run the two countdowns sequentially:
 
 ```idris
-countSequentially : Scheduler => Async [] ()
+countSequentially : Async [] ()
 countSequentially = do
   putStrLn "Sequential countdown:"
   countSeconds 2
@@ -140,7 +140,7 @@ to finish using `joinResult`. Here's the code:
 
 
 ```idris
-countParallel : Scheduler => Async [] ()
+countParallel : Async [] ()
 countParallel = do
   putStrLn "Concurrent countdown"
   f1 <- start $ countSeconds 2
@@ -182,7 +182,7 @@ stores their results again in a heterogeneous list (use `"par2"` as the
 command-line argument to run the next example):
 
 ```idris
-countParallel2 : Scheduler => Async [] ()
+countParallel2 : Async [] ()
 countParallel2 = ignore $ par [ countSeconds 2, countMillis 10 ]
 ```
 
@@ -195,7 +195,7 @@ later on. For now, let's just run our countdowns concurrently
 until the faster of the two terminates:
 
 ```idris
-raceParallel : Scheduler => Async [] ()
+raceParallel : Async [] ()
 raceParallel = do
   putStrLn "Racing countdowns" 
   ignore $ race [ countSeconds 10000, countMillis 10 ]
@@ -323,7 +323,7 @@ This final sections only shows the `main` functions and a few utilities
 used to run the examples in this introduction.
 
 ```idris
-act : Scheduler => List String -> Async [] ()
+act : List String -> Async [] ()
 act ("par"   :: _) = countParallel
 act ("par2"  :: _) = countParallel2
 act ("race"  :: _) = raceParallel
@@ -336,11 +336,7 @@ act _              = countSequentially
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
 run threads args = do
-  sc <- newSchedulerST
-  t  <- fork $ process sc
-  app threads $ act @{sc} args
-  stop sc
-  threadWait t
+  app threads $ act args
   putStrLn "All threads stopped"
 
 covering
