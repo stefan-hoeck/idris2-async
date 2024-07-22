@@ -47,9 +47,21 @@ parameters {auto ref : IORef (SnocList Event)}
   tickTackTock False False  =
     tick >> tack >> tock
 
-  outer : (oncncl,masked : Bool) -> Async [] ()
-  outer o m = do
-    fbr <- start (onCnclB o $ tickTackTock False m)
+  tickTackTockPolled : (cancel : Bool) -> Async [] ()
+  tickTackTockPolled True =
+    uncancelable (\p => tick >> canceled >> tack >> p (tock >> tack)) >> tock
+  tickTackTockPolled False =
+    uncancelable (\p => tick >> tack >> p (tock >> tack)) >> tock
+
+  tickTackTockUCBoundary : Async [] ()
+  tickTackTockUCBoundary =
+    uncancelable (\_ => tick >> canceled >> tack) >> uncancelable (\_ => tock)
+
+
+  outer : (oncncl : Bool) -> Async [] () -> Async [] ()
+  outer o act = do
+    fbr <- start (onCnclB o act)
+    -- fbr <- start (onCnclB o $ tickTackTock False m)
     cede
     cancel fbr
 
@@ -73,14 +85,22 @@ instrs =
       (assert (run $ onCncl (tickTackTock True False)) [Tick,Canceled])
   , it `should` "finish a masked region after self-cancelation" `at`
       (assert (run $ onCncl (tickTackTock True True)) [Tick,Tack,Canceled])
+  , it `should` "run polled sections when not canceled" `at`
+      (assert (run $ tickTackTockPolled False) [Tick,Tack,Tock,Tack,Tock])
+  , it `should` "abort in a polled section after cancelation" `at`
+      (assert (run $ tickTackTockPolled True) [Tick,Tack])
+  , it `should` "observe cancelation immediately after an `uncancelable` block" `at`
+      (assert (run $ tickTackTockUCBoundary) [Tick,Tack])
   , it `should` "abort immediately after cancelation from the outside" `at`
-      (assert (run $ outer False False) [Tick])
+      (assert (run $ outer False $ tickTackTock False False) [Tick])
   , it `should` "run `onCancel` hooks after cancelation from the outside" `at`
-      (assert (run $ outer True False) [Tick,Canceled])
+      (assert (run $ outer True $ tickTackTock False False) [Tick,Canceled])
   , it `should` "finish a masked region after cancelation from the outside" `at`
-      (assert (run $ outer True True) [Tick,Tack,Canceled])
+      (assert (run $ outer True $ tickTackTock False True) [Tick,Tack,Canceled])
   , it `should` "block while waiting for termination of a fiber it canceled" `at`
-      (assert (run $ outer True True >> fire Outer) [Tick,Tack,Canceled,Outer])
+      (assert (run $ outer True (tickTackTock False True) >> fire Outer) [Tick,Tack,Canceled,Outer])
+  , it `should` "abort in a polled section after cancelation from the outside" `at`
+      (assert (run $ outer True (tickTackTockPolled True)) [Tick,Tack,Canceled])
   ]
 
 export covering
