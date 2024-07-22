@@ -237,7 +237,7 @@ canceled = Cancel
 ||| This is an alias for `canceled >> never`.
 |||
 ||| The advantage of this is that unlike `canceled` it claims to produce
-||| a value of any type. This is useful when using it to join fibers in
+||| a value of any type. This is useful when using it to join fibers in a
 ||| cancelable environment. However, if this is used in an uncancelable
 ||| section, it will unvariably deadlock forever.
 export %inline
@@ -387,6 +387,10 @@ join f = do
   cancelableAsync $ \cb =>
     f.observe t (cb . Right) $>
     liftIO (f.stopObserving t >> cb (Right Canceled))
+
+export %inline
+wait : Fiber es a -> Async fs ()
+wait = ignore . join
 
 export
 joinMaybe : Fiber es a -> Async es (Maybe a)

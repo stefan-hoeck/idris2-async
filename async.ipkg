@@ -14,6 +14,7 @@ modules = IO.Async
         , IO.Async.MVar
         , IO.Async.Outcome
         , IO.Async.Resource
+        , IO.Async.Signal
         , IO.Async.Sleep
         , IO.Async.ThreadPool
         , IO.Async.Token
