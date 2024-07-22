@@ -32,6 +32,10 @@ parameters {auto ref : IORef (SnocList Event)}
   onCncl : Async [] a -> Async [] a
   onCncl v = onCancel v (fire Canceled)
 
+  onCnclB : Bool -> Async [] a -> Async [] a
+  onCnclB True  v = onCncl v
+  onCnclB False v = v
+
   tickTackTock : (cancel, masked : Bool) -> Async [] ()
   tickTackTock True True  =
     uncancelable (\_ => tick >> canceled >> tack) >> tock
@@ -41,6 +45,13 @@ parameters {auto ref : IORef (SnocList Event)}
     tick >> canceled >> tack >> tock
   tickTackTock False False  =
     tick >> tack >> tock
+
+  outer : (oncncl,masked : Bool) -> Async [] ()
+  outer o m = do
+    fbr <- start (onCnclB o $ tickTackTock False m)
+    cede
+    cancel fbr
+    ignore $ join fbr
 
 run : (IORef (SnocList Event) => Async [] ()) -> Async [] (List Event)
 run f = do
@@ -52,7 +63,7 @@ run f = do
 covering
 instrs : List FlatSpecInstr
 instrs =
-  [ "a cancelable fiber" `should` "run to completion if it's not canceled" `at`
+  [ "a fiber" `should` "run to completion if it's not canceled" `at`
       (assert (run $ tickTackTock False False) [Tick,Tack,Tock])
   , it `should` "not run `onCancel` hooks if it's not canceled" `at`
       (assert (run $ onCncl (tickTackTock False False)) [Tick,Tack,Tock])
@@ -60,6 +71,14 @@ instrs =
       (assert (run $ tickTackTock True False) [Tick])
   , it `should` "run `onCancel` hooks after self-cancelation" `at`
       (assert (run $ onCncl (tickTackTock True False)) [Tick,Canceled])
+  , it `should` "finish a masked region after self-cancelation" `at`
+      (assert (run $ onCncl (tickTackTock True True)) [Tick,Tack,Canceled])
+  , it `should` "abort immediately after cancelation from the outside" `at`
+      (assert (run $ outer False False) [Tick])
+  , it `should` "run `onCancel` hooks after cancelation from the outside" `at`
+      (assert (run $ outer True False) [Tick,Canceled])
+  , it `should` "finish a masked region after cancelation from the outside" `at`
+      (assert (run $ outer True True) [Tick,Tack,Canceled])
   ]
 
 export covering
