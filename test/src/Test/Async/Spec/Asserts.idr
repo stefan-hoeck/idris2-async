@@ -15,8 +15,7 @@ export covering
 runAsyncBlocking : Async es a -> IO (Outcome es a)
 runAsyncBlocking as = do
   ref <- newIORef (the (Outcome es a) Canceled)
-  ec  <- sync
-  runAsyncWith @{ec} as (writeIORef ref)
+  syncApp (dropErrs $ ignore $ guaranteeCase as (writeIORef ref))
   readIORef ref
 
 export %inline

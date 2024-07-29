@@ -398,7 +398,9 @@ parameters {auto ec : ExecutionContext}
     case act of
       UC f   => run (f fbr.token 1) 1 cc fbr st w
       Term x => case st of
-        Bnd f :: t  => run (f x) 0 cc fbr t w
+        Bnd f :: t  => case f x of
+          UC g => run (g fbr.token 1) 1 cc fbr t w
+          a    => run (pure ()) 1 cc fbr (hooks st) w
         Inc :: t    => run (Term x) 1 cc fbr t w
         _           => run (pure ()) 1 cc fbr (hooks st) w
       _    => run (pure ()) 1 cc fbr (hooks st) w
