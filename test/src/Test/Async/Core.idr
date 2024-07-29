@@ -1,7 +1,6 @@
 module Test.Async.Core
 
 import Test.Async.Spec
-import IO.Async.Sleep
 
 %default total
 
@@ -12,7 +11,7 @@ lifted : Async [] Nat
 lifted = pure val
 
 liftedAsync : Async [] Nat
-liftedAsync = async $ \cb => cb (Right val)
+liftedAsync = primAsync_ $ \cb => cb (Right val)
 
 compute : Nat -> Nat -> Nat -> Nat
 compute x y z = (x `minus` y) + z

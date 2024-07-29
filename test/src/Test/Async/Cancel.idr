@@ -57,6 +57,12 @@ parameters {auto ref : IORef (SnocList Event)}
   tickTackTockUCBoundary =
     uncancelable (\_ => tick >> canceled >> tack) >> uncancelable (\_ => tock)
 
+  tickTackTockUCSkipBoundary : Async [] ()
+  tickTackTockUCSkipBoundary =
+    uncancelable (\_ => tick >> canceled >> tack) >>
+    pure () >>
+    uncancelable (\_ => tock)
+
 
   outer : (oncncl : Bool) -> Async [] () -> Async [] ()
   outer o act = do
@@ -89,8 +95,10 @@ instrs =
       (assert (run $ tickTackTockPolled False) [Tick,Tack,Tock,Tack,Tock])
   , it `should` "abort in a polled section after cancelation" `at`
       (assert (run $ tickTackTockPolled True) [Tick,Tack])
-  , it `should` "observe cancelation immediately after an `uncancelable` block" `at`
-      (assert (run $ tickTackTockUCBoundary) [Tick,Tack])
+  , it `should` "not observe cancelation between adjacent `uncancelable` blocks" `at`
+      (assert (run $ tickTackTockUCBoundary) [Tick,Tack,Tock])
+  , it `should` "observe cancelation between non-adjacent `uncancelable` blocks" `at`
+      (assert (run $ tickTackTockUCSkipBoundary) [Tick,Tack])
   , it `should` "abort immediately after cancelation from the outside" `at`
       (assert (run $ outer False $ tickTackTock False False) [Tick])
   , it `should` "run `onCancel` hooks after cancelation from the outside" `at`

@@ -1,6 +1,7 @@
-module IO.Async.Token
+||| A unique token to identify fibers
+module IO.Async.Internal.Token
 
-import IO.Async.MVar
+import IO.Async.Internal.Ref
 import Derive.Prelude
 
 %default total
@@ -19,13 +20,15 @@ export
 record TokenGen where
   [noHints]
   constructor TG
-  var : MVar Nat
+  var : Ref Nat
 
 export
 newTokenGen : IO TokenGen
-newTokenGen = TG <$> newMVar 0
+newTokenGen = TG <$> primIO (newRef 0)
 
 ||| Generates a new unique fiber token.
-export
-token : HasIO io => (g : TokenGen) => io Token
-token = liftIO $ evalState g.var (\x => (S x, T x))
+export %inline
+token : (g : TokenGen) => PrimIO Token
+token w =
+  let MkIORes n w := getAndUpdate g.var S w
+   in MkIORes (T n) w

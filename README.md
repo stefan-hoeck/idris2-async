@@ -21,11 +21,11 @@ Before we start, let's import a couple of modules:
 module README
 
 import Data.List
+import Data.Nat
 import IO.Async
-import IO.Async.ThreadPool
 import IO.Async.Signal
-import IO.Async.Sleep
 import System
+import System.Clock
 
 %default total
 ```
@@ -214,7 +214,7 @@ raceParallel = do
   ignore $ race
     [ countSeconds 10000
     , countMillis 50
-    , handle [onSigErr] $ blockTill SigINT >> putStrLn "interrupted by SigINT"
+    , onSignal SigINT (putStrLn "\nInterrupted by SigINT")
     ]
 ```
 
