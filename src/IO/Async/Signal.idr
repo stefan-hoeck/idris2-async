@@ -1,19 +1,23 @@
 module IO.Async.Signal
 
-import IO.Async.Fiber
 import IO.Async.Outcome
+import IO.Async.Type
+import IO.Async.Util
 import public System.Signal
 
 %default total
 
-||| Semantically blocks the current fiber until the given signal is
-||| encountered.
 export covering
-blockTill : Has SignalError es => Signal -> Async es ()
-blockTill sig = injectIO (collectSignal sig) >> go
+awaitSignal : Signal -> Async es ()
+awaitSignal s = ignore (collectSignal s) >> loop
   where
-    go : Async es ()
-    go = do
-      cede
-      v <- handleNextCollectedSignal
-      unless (v == Just sig) go
+    covering
+    loop : Async es ()
+    loop = do
+      sleep 10.ms
+      Just x <- handleNextCollectedSignal | Nothing => loop
+      when (s /= x) loop
+
+export covering %inline
+onSignal : Signal -> Async es a -> Async es a
+onSignal s act = awaitSignal s >> act

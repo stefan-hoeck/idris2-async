@@ -8,15 +8,18 @@ depends = base >= 0.7.0
         , quantifiers-extra
 
 modules = IO.Async
-        , IO.Async.Event
-        , IO.Async.ExecutionContext
-        , IO.Async.Fiber
-        , IO.Async.MVar
         , IO.Async.Outcome
         , IO.Async.Resource
         , IO.Async.Signal
-        , IO.Async.Sleep
-        , IO.Async.ThreadPool
-        , IO.Async.Token
+        , IO.Async.Type
+        , IO.Async.Util
+
+        , IO.Async.Internal.Concurrent
+        , IO.Async.Internal.ExecutionContext
+        , IO.Async.Internal.Loop
+        , IO.Async.Internal.Ref
+        , IO.Async.Internal.ThreadPool
+        , IO.Async.Internal.Timer
+        , IO.Async.Internal.Token
 
 sourcedir = "src"

@@ -4,10 +4,12 @@ import Data.Maybe
 import IO.Async.Type
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.ExecutionContext
+import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.ThreadPool
 import IO.Async.Internal.Token
 import System
+import System.Clock
 
 %default total
 
@@ -80,6 +82,11 @@ embed oc Canceled        = oc
 export %inline
 join : Fiber es a -> Async fs (Outcome es a)
 join f = primAsync $ \cb => f.observe_ $ cb . Right
+
+||| Awaits the termination of a fiber ignoring its outcome.
+export %inline
+wait : Fiber es a -> Async fs ()
+wait = ignore . join
 
 ||| Cancels the given fiber.
 |||
@@ -240,37 +247,34 @@ raceOutcome fa fb =
 ||| @see
 |||   [[raceOutcome]] for a variant that returns the outcome of the winner.
 export
-race2 : Async es a -> Async es b -> Async es (Outcome [] $ Either a b)
+race2 : Async es a -> Async es b -> Async es (Maybe $ Either a b)
 race2 fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc,f) => case oc of
-      Succeeded res => cancel f $> Succeeded (Left res)
+      Succeeded res => cancel f $> Just (Left res)
       Error err     => cancel f >> fail err
       Canceled      => join f >>= \case
-        Succeeded res => pure $ Succeeded (Right res)
+        Succeeded res => pure $ Just (Right res)
         Error err     => fail err
-        Canceled      => pure Canceled
+        Canceled      => pure Nothing
     Right (f,oc) => case oc of
-      Succeeded res => cancel f $> Succeeded (Right res)
+      Succeeded res => cancel f $> Just (Right res)
       Error err     => cancel f >> fail err
       Canceled      => join f >>= \case
-        Succeeded res => pure $ Succeeded (Left res)
+        Succeeded res => pure $ Just (Left res)
         Error err     => fail err
-        Canceled      => pure Canceled
+        Canceled      => pure Nothing
 
 ||| This generalizes `race2` to an arbitrary heterogeneous list.
 export
-race : All (Async es) ts -> Async es (Outcome [] $ HSum ts)
-race []       = pure Canceled
-race [x]      = map (Succeeded . Here) x
+race : All (Async es) ts -> Async es (Maybe $ HSum ts)
+race []       = pure Nothing
+race [x]      = map (Just . Here) x
 race (x :: y) =
   flip map (race2 x $ race y) $ \case
-    Succeeded (Left z)              => Succeeded (Here z)
-    Succeeded (Right (Succeeded z)) => Succeeded (There z)
-    Succeeded (Right Canceled)      => Canceled
-    Succeeded (Right (Error err)) impossible
-    Canceled                        => Canceled
-    Error err impossible
+    Just (Left z)         => Just (Here z)
+    Just (Right (Just z)) => Just (There z)
+    _                     => Nothing
 
 ||| Races the evaluation of two fibers and returns the [[Outcome]] of both. If the race is
 ||| canceled before one or both participants complete, then then whichever ones are incomplete
@@ -319,23 +323,94 @@ bothOutcome fa fb =
 ||| @see
 |||   [[bothOutcome]] for a variant that returns the [[Outcome]] of both fibers.
 export
-both : Async es a -> Async es b -> Async es (Outcome [] (a,b))
+both : Async es a -> Async es b -> Async es (Maybe (a,b))
 both fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc, f) => case oc of
       Succeeded x => onCancel (poll $ join f) (cancel f) >>= \case
-        Succeeded y => pure $ Succeeded (x,y)
+        Succeeded y => pure $ Just (x,y)
         Error err   => fail err
-        Canceled    => pure Canceled
+        Canceled    => pure Nothing
       Error err     => cancel f >> fail err
-      Canceled      => cancel f >> pure Canceled
+      Canceled      => cancel f >> pure Nothing
     Right (f, oc) => case oc of
       Succeeded y => onCancel (poll $ join f) (cancel f) >>= \case
-        Succeeded x => pure $ Succeeded (x,y)
+        Succeeded x => pure $ Just (x,y)
         Error err   => fail err
-        Canceled    => pure Canceled
+        Canceled    => pure Nothing
       Error err     => cancel f >> fail err
-      Canceled      => cancel f >> pure Canceled
+      Canceled      => cancel f >> pure Nothing
+
+||| Runs the given heterogeneous lists of asynchronous computations
+||| in parallel, collecting the results again in a heterogeneous list.
+export
+par : All (Async es) ts -> Async es (Maybe $ HList ts)
+par []     = pure (Just [])
+par [x]    = map (\v => Just [v]) x
+par (h::t) =
+  flip map (both h $ par t) $ \case
+    Just (h2,Just t2) => Just (h2::t2)
+    _                 => Nothing
+
+||| Traverses a list of values effectfully in parallel.
+|||
+||| This returns `Nothing` if one of the fibers was canceled.
+export
+parTraverse : (a -> Async es b) -> List a -> Async es (Maybe $ List b)
+parTraverse f []     = pure (Just [])
+parTraverse f [x]    = map (Just . pure) (f x)
+parTraverse f (h::t) =
+  flip map (both (f h) (parTraverse f t)) $ \case
+    Just (h2,Just t2) => Just (h2::t2)
+    _                 => Nothing
+
+--------------------------------------------------------------------------------
+-- Async Utilitis
+--------------------------------------------------------------------------------
+
+||| Like `primAsync` but does not provide a hook for canceling.
+export
+primAsync_ : ((Result es a -> PrimIO ()) -> PrimIO ()) -> Async es a
+primAsync_ f =
+  primAsync $ \cb,w =>
+    let MkIORes _ w := f cb w
+     in MkIORes primDummy w
+
+--------------------------------------------------------------------------------
+-- Sleeping and Timed Execution
+--------------------------------------------------------------------------------
+
+||| Wraps a lazy value in an `Async`.
+export
+lazy : Lazy a -> Async es a
+lazy v = primAsync_ $ \cb => cb (Right v)
+
+||| Delay a computation by the given number of nanoseconds.
+export
+sleep : (dur : Clock Duration) -> Async es ()
+sleep dur = do
+  now <- liftIO (clockTime Monotonic)
+  waitTill (addDuration now dur)
+
+||| Delay a computation by the given number of nanoseconds.
+export
+delay : (dur : Clock Duration) -> Async es a -> Async es a
+delay dur act = sleep dur >> act
+
+||| Converts a number of microseconds to nanoseconds
+export
+(.us) : Nat -> Clock Duration
+n.us = fromNano . cast $ n * 1_000
+
+||| Converts a number of seconds to nanoseconds
+export
+(.s) : Nat -> Clock Duration
+n.s = (n * 1_000_000).us
+
+||| Converts a number of milliseconds to nanoseconds
+export
+(.ms) : Nat -> Clock Duration
+n.ms = (n * 1000).us
 
 --------------------------------------------------------------------------------
 -- Running `Async`
