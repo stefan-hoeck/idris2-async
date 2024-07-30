@@ -165,7 +165,7 @@ current thread.
 
 ```sh
 > pack -o async exec docs/src/README.md par
-Condurrent countdown
+Concurrent countdown
 1000 ms left
 2 s left
 900 ms left
