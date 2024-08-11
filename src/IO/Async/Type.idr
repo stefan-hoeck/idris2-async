@@ -1,6 +1,7 @@
 module IO.Async.Type
 
 import Data.Nat
+import IO.Async.Loop
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token

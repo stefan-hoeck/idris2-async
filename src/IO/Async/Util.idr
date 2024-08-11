@@ -1,11 +1,12 @@
 module IO.Async.Util
 
 import Data.Maybe
-import IO.Async.Type
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Loop.TimerH
+import IO.Async.Type
 import System.Clock
 
 %default total
@@ -384,14 +385,21 @@ lazy v = primAsync_ $ \cb => cb (Right v)
 
 ||| Delay a computation by the given number of nanoseconds.
 export
-sleep : (dur : Clock Duration) -> Async e es ()
--- sleep dur = do
---   now <- liftIO (clockTime Monotonic)
---   waitTill (addDuration now dur)
+waitTill : TimerH e => Clock Monotonic -> Async e es ()
+waitTill cl = do
+  ev <- env
+  primAsync $ \cb => primWaitTill ev cl (cb $ Right ())
 
 ||| Delay a computation by the given number of nanoseconds.
 export
-delay : (dur : Clock Duration) -> Async e es a -> Async e es a
+sleep : TimerH e => (dur : Clock Duration) -> Async e es ()
+sleep dur = do
+  now <- liftIO (clockTime Monotonic)
+  waitTill (addDuration now dur)
+
+||| Delay a computation by the given number of nanoseconds.
+export
+delay : TimerH e => (dur : Clock Duration) -> Async e es a -> Async e es a
 delay dur act = sleep dur >> act
 
 ||| Converts a number of microseconds to nanoseconds

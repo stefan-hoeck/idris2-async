@@ -1,8 +1,11 @@
 ||| Utilities for working with work loops.
 module IO.Async.Internal.Loop
 
+import Data.So
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Ref
+import System.Clock
+import System
 
 %default total
 
@@ -53,43 +56,36 @@ sleepNoWork c m us w =
   let MkIORes _ w := conditionWaitTimeout c m us w
    in noWork w
 
+||| Tail-recursively runs a list of `PrimIO` actions
+export
+runAll : (a -> PrimIO ()) -> List a -> PrimIO ()
+runAll f []        w = MkIORes () w
+runAll f (x :: xs) w = let MkIORes _ w := f x w in runAll f xs w
+
+||| Keep only those values in a list that have not yet been canceled.
+export
+nonCanceled : (a -> Ref Bool) -> List a -> PrimIO (List a)
+nonCanceled f = go [<]
+
+  where
+    go : SnocList a -> List a -> PrimIO (List a)
+    go sx []        w = MkIORes (sx <>> []) w
+    go sx (x :: xs) w =
+      let MkIORes b w := readRef (f x) w
+       in case b of
+            True  => go sx xs w
+            False => go (sx :< x) xs w
+
+||| Sleeps for the given duration (rounded down to micro seconds)
+export
+doSleep : Clock Duration -> PrimIO ()
+doSleep c w =
+  let v := cast {to = Int} (toNano c `div` 1000)
+   in case choose (v >= 0) of
+        Left x  => toPrim (usleep v) w
+        Right x => MkIORes () w
+
 ||| Boolean-like flag indicating if a loop is still alive or should
 ||| stop.
 public export
 data Alive = Stop | Run
-
---------------------------------------------------------------------------------
--- Event Loop
---------------------------------------------------------------------------------
-
-||| Initial work package sent to an event loop.
-|||
-||| Most work will be run on one of the worker threads of a thread pool,
-||| so this provides a way for the worker to inform the work package how
-||| to cede itself to later execuption. This allows us to evaluate a single
-||| fiber mostly on one thread even in the face of (auto)-ceding.
-public export
-record Package (e : Type) where
-  constructor Pkg
-  env : Ref e
-  act : PrimIO ()
-
-||| A context for submitting and running work packages asynchronously.
-|||
-||| The basic functionality of an event loop is to allow us to spawn
-||| new work packages, all of which will then be run concurrently (but not
-||| necessarily in parallel), and to `cede` a running computation, so that
-||| it will be processed later while allowing other work packages to be
-||| processed first.
-|||
-||| In addition, an event loop can support arbitrary additional effects, for
-||| instance, the ability to setup timers, signal handlers, and asynchronous
-||| `IO` actions. These additional capabilities are represented by type
-||| parameter `e`, representing the event loop currently processing a work
-||| package.
-public export
-record EventLoop (e : Type) where
-  constructor EC
-  spawn : Package e -> PrimIO ()
-  cede  : e -> PrimIO () -> PrimIO ()
-  init  : e
