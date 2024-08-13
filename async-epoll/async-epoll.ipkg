@@ -1,0 +1,11 @@
+package async-epoll
+version = 0.1.0
+authors = "stefan-hoeck"
+brief   = "An epoll-based event loop for asynchronous computations on Linux"
+
+depends = async
+        , epoll
+
+modules = IO.Async.Loop.Epoll
+
+sourcedir = "src"

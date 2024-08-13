@@ -25,6 +25,16 @@ export
 primDummy : PrimIO ()
 primDummy = \w => MkIORes () w
 
+||| `PrimIO` version of `die`
+export %inline
+primDie : String -> PrimIO ()
+primDie s = toPrim $ die s
+
+export %inline
+primWhen : Bool -> PrimIO () -> PrimIO ()
+primWhen True  f = f
+primWhen False _ = MkIORes ()
+
 ||| An empty work package.
 export %inline
 noWork : PrimIO Work
