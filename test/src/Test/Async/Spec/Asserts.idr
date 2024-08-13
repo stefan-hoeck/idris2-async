@@ -3,6 +3,7 @@ module Test.Async.Spec.Asserts
 import Data.IORef
 import Data.String
 import IO.Async
+import IO.Async.Loop.Sync
 import Test.Async.Spec.Report
 import Test.Async.Spec.TestEnv
 import Test.Async.Spec.TestResult
@@ -12,7 +13,7 @@ import Text.Show.Pretty
 %default total
 
 export covering
-runAsyncBlocking : Async es a -> IO (Outcome es a)
+runAsyncBlocking : Async SyncST es a -> IO (Outcome es a)
 runAsyncBlocking as = do
   ref <- newIORef (the (Outcome es a) Canceled)
   syncApp (dropErrs $ ignore $ guaranteeCase as (writeIORef ref))
@@ -59,7 +60,7 @@ export %inline
 (===) x y = diff x (==) y
 
 export covering
-assert : Show a => Eq a => Async [] a -> (expected : a) -> IO TestResult
+assert : Show a => Eq a => Async SyncST [] a -> (expected : a) -> IO TestResult
 assert as exp = do
   runAsyncBlocking as >>= \case
     Error err     => absurd err

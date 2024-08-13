@@ -18,26 +18,26 @@ data Event : Type where
 
 parameters {auto ref : IORef (SnocList Event)}
 
-  fire : Event -> Async [] ()
+  fire : Event -> Async e [] ()
   fire e = modifyIORef ref (:< e) >> cede
 
-  tick : Async [] ()
+  tick : Async e [] ()
   tick = fire Tick
 
-  tock : Async [] ()
+  tock : Async e [] ()
   tock = fire Tock
 
-  tack : Async [] ()
+  tack : Async e [] ()
   tack = fire Tack
 
-  onCncl : Async [] a -> Async [] a
+  onCncl : Async e [] a -> Async e [] a
   onCncl v = onCancel v (fire Canceled)
 
-  onCnclB : Bool -> Async [] a -> Async [] a
+  onCnclB : Bool -> Async e [] a -> Async e [] a
   onCnclB True  v = onCncl v
   onCnclB False v = v
 
-  tickTackTock : (cancel, masked : Bool) -> Async [] ()
+  tickTackTock : (cancel, masked : Bool) -> Async e [] ()
   tickTackTock True True  =
     uncancelable (\_ => tick >> canceled >> tack) >> tock
   tickTackTock False True  =
@@ -47,31 +47,31 @@ parameters {auto ref : IORef (SnocList Event)}
   tickTackTock False False  =
     tick >> tack >> tock
 
-  tickTackTockPolled : (cancel : Bool) -> Async [] ()
+  tickTackTockPolled : (cancel : Bool) -> Async e [] ()
   tickTackTockPolled True =
     uncancelable (\p => tick >> canceled >> tack >> p (tock >> tack)) >> tock
   tickTackTockPolled False =
     uncancelable (\p => tick >> tack >> p (tock >> tack)) >> tock
 
-  tickTackTockUCBoundary : Async [] ()
+  tickTackTockUCBoundary : Async e [] ()
   tickTackTockUCBoundary =
     uncancelable (\_ => tick >> canceled >> tack) >> uncancelable (\_ => tock)
 
-  tickTackTockUCSkipBoundary : Async [] ()
+  tickTackTockUCSkipBoundary : Async e [] ()
   tickTackTockUCSkipBoundary =
     uncancelable (\_ => tick >> canceled >> tack) >>
     pure () >>
     uncancelable (\_ => tock)
 
 
-  outer : (oncncl : Bool) -> Async [] () -> Async [] ()
+  outer : (oncncl : Bool) -> Async e [] () -> Async e [] ()
   outer o act = do
     fbr <- start (onCnclB o act)
     -- fbr <- start (onCnclB o $ tickTackTock False m)
     cede
     cancel fbr
 
-run : (IORef (SnocList Event) => Async [] ()) -> Async [] (List Event)
+run : (IORef (SnocList Event) => Async e [] ()) -> Async e [] (List Event)
 run f = do
   ref <- newIORef [<]
   fbr <- start (f @{ref})

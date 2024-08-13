@@ -1,7 +1,7 @@
 module IO.Async.Loop.Sync
 
 import Data.SortedMap
-import IO.Async.Loop
+import public IO.Async.Loop
 import IO.Async.Loop.TimerH
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref

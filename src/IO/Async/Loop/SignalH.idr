@@ -1,9 +1,9 @@
 module IO.Async.Loop.SignalH
 
-import System.Signal
+import public System.Signal
 
 %default total
 
 public export
 interface SignalH a where
-  onSignal : a -> Signal -> PrimIO () -> PrimIO (PrimIO ())
+  primOnSignal : a -> Signal -> PrimIO () -> PrimIO (PrimIO ())

@@ -5,6 +5,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Loop.Sync
 import IO.Async.Loop.TimerH
 import IO.Async.Type
 import System.Clock
@@ -422,11 +423,11 @@ n.ms = (n * 1000).us
 --------------------------------------------------------------------------------
 
 export covering
-syncApp : Async e [] () -> IO ()
--- syncApp as = do
---   ec  <- sync
---   tg  <- newTokenGen
---   runAsync 1024 as
+syncApp : Async SyncST [] () -> IO ()
+syncApp as = do
+  el  <- sync
+  tg  <- newTokenGen
+  runAsync 1024 el as
 -- 
 -- export covering
 -- app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async e [] () -> IO ()
