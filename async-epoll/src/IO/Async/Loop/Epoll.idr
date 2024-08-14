@@ -1,6 +1,6 @@
 module IO.Async.Loop.Epoll
 
-import Data.Nat
+import public Data.Nat
 import Data.Queue
 import Data.SortedMap as SM
 import Data.Vect
@@ -8,9 +8,12 @@ import Data.Vect
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Loop
-import IO.Async.Loop.SignalH
-import IO.Async.Loop.TimerH
+import IO.Async.Internal.Token
+
+import public IO.Async
+import public IO.Async.Loop
+import public IO.Async.Loop.SignalH
+import public IO.Async.Loop.TimerH
 
 import System
 import System.Linux.Epoll
@@ -38,6 +41,7 @@ record FileHandle where
 export
 record EpollST where
   constructor EST
+  nr       : Nat
   epoll    : EpollFD
   tasks    : Ref (SnocList $ PrimIO ())
   queue    : Ref (Queue $ Package EpollST)
@@ -46,6 +50,10 @@ record EpollST where
 --------------------------------------------------------------------------------
 -- Utilities
 --------------------------------------------------------------------------------
+
+indices : (n : Nat) -> Vect n Nat
+indices 0     = []
+indices (S k) = k :: indices k
 
 -- Polling timeout: This is 0 in case we still have tasks in the local queue,
 -- otherwise it is `infinity`.
@@ -74,6 +82,28 @@ addHandle file es fs fh s w =
       MkIORes _ w := epollAdd s.epoll fd es fs w
       MkIORes _ w := update s.handles (insert fd fh) w
    in MkIORes (removeFile s fd fh.autoClose) w
+
+--------------------------------------------------------------------------------
+-- Interfaces
+--------------------------------------------------------------------------------
+
+export
+TimerH EpollST where
+  primWaitTill s cl f w =
+    let MkIORes now w := toPrim (clockTime Monotonic) w
+     in case now >= cl of
+          True  => let MkIORes _ w := f w in MkIORes primDummy w
+          False =>
+            let MkIORes ft  w := timerCreate MONOTONIC neutral w
+                MkIORes _   w := setTime ft (timeDifference cl now) w
+             in addHandle ft EPOLLIN EPOLLET (FH (const f) True True) s w
+
+export
+SignalH EpollST where
+  primOnSignal s sig f w =
+    let MkIORes _   w := blockSignals [sig] w
+        MkIORes fs  w := signalCreate [sig] neutral w
+     in addHandle fs EPOLLIN EPOLLET (FH (const f) True True) s w
 
 --------------------------------------------------------------------------------
 -- Loop Implementation
@@ -111,7 +141,8 @@ poll s w =
    in case r of
         NoEv   => runTasks s w
         Ev f e =>
-          let MkIORes m w := readRef s.handles w
+          let MkIORes _ w := toPrim (putStrLn "Thread \{show $ s.nr} got event for \{show f}: \{show e}") w
+              MkIORes m w := readRef s.handles w
            in onEvent s f e (lookup f m) w
         Err x  =>
           let MkIORes _ w := toPrim (putStrLn "Polling error: \{x}") w
@@ -132,13 +163,13 @@ fetch s fd es w =
 
 -- initialize the state of a worker thread.
 covering
-epollST : (cncl,spwn : EventFD) -> Ref (Queue $ Package EpollST) -> IO EpollST
-epollST cncl spwn queue = do
+epollST : (cncl,spwn : EventFD) -> Ref (Queue $ Package EpollST) -> Nat -> IO EpollST
+epollST cncl spwn queue n = do
   Right efd <- epollCreate | Left err => die "Epoll error: \{err}"
   tasks     <- fromPrim (newRef [<])
   handles   <- fromPrim (newRef empty)
-  let s := EST efd tasks queue handles
-  _         <- fromPrim $ addHandle spwn EPOLLIN EPOLLET (FH (fetch s spwn) False False) s
+  let s := EST n efd tasks queue handles
+  _         <- fromPrim $ addHandle spwn EPOLLIN (EPOLLET <+> EPOLLEXCLUSIVE) (FH (fetch s spwn) False False) s
   _         <- fromPrim $ epollAdd efd cncl EPOLLIN neutral
   pure s
 
@@ -148,7 +179,8 @@ epollST cncl spwn queue = do
 
 spawnImpl : EventFD -> Ref (Queue $ Package EpollST) -> Package EpollST -> PrimIO ()
 spawnImpl spwn q p w =
-  let MkIORes _ w := update q (`enqueue` p) w
+  let MkIORes _ w := toPrim (putStrLn "Spawning a fiber") w
+      MkIORes _ w := update q (`enqueue` p) w
    in writeEv spwn 1 w
 
 tearDown : {n : _} -> (spwn,cncl : EventFD) -> Vect n ThreadID -> IO ()
@@ -164,6 +196,20 @@ epollLoop (S k) = do
   spwn  <- fromPrim $ eventfd 0 (EFD_SEMAPHORE <+> EFD_NONBLOCK)
   cncl  <- fromPrim $ eventfd 0 neutral
   queue <- fromPrim $ newRef empty
-  sts   <- sequence $ Vect.replicate (S k) (epollST cncl spwn queue)
+  sts   <- traverse (epollST cncl spwn queue) (indices $ S k)
   ts    <- for sts $ \s => fork (fromPrim $ poll s)
+  putStrLn "Starting epoll loop. Spawn FD: \{show $ fileDesc spwn}, cancel FD: \{show $ fileDesc cncl}"
   pure (EL (spawnImpl spwn queue) cedeImpl (head sts), tearDown spwn cncl ts)
+
+export covering
+app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async EpollST [] () -> IO ()
+app n act = do
+  (el,close) <- epollLoop n
+  m  <- primIO mkMutex
+  c  <- primIO makeCondition
+  tg <- newTokenGen
+  runAsyncWith 1024 el act (\_ => primIO $ conditionBroadcast c)
+  primIO $ acqMutex m
+  primIO $ conditionWait c m
+  close
+  usleep 100

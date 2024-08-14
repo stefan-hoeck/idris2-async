@@ -1,6 +1,6 @@
 module IO.Async.Loop.TimerH
 
-import System.Clock
+import public System.Clock
 
 %default total
 
