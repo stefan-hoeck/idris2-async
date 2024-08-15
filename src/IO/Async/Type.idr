@@ -442,7 +442,7 @@ parameters {auto tg : TokenGen}
         let MkIORes mv w := readRef res w
          in case mv of
               Just v  => run el (Term v) cm cc fbr st w
-              Nothing => suspend fbr (cedeFbr el fbr (run el act cm limit fbr st)) w
+              Nothing => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) w
 
   export covering
   runAsyncWith : EventLoop e -> Async e es a -> (Outcome es a -> IO ()) -> IO ()
