@@ -51,13 +51,17 @@ record EpollST where
   lock     : Mutex
   spwn     : EventFD
   epoll    : EpollFD
-  tasks    : Ref (SnocList $ PrimIO ())
-  queue    : Ref (Queue $ Package EpollST)
+  alive    : Ref Alive
+  queue    : Ref (Queue $ PrimIO ())
+  outer    : Ref (Queue $ Package EpollST)
   handles  : Ref (SortedMap Bits32 FileHandle)
 
 --------------------------------------------------------------------------------
 -- Utilities
 --------------------------------------------------------------------------------
+
+submitWork : EpollST -> PrimIO () -> PrimIO ()
+submitWork s a w = enq s.queue a w
 
 indices : (n : Nat) -> Vect n Nat
 indices 0     = []
@@ -110,118 +114,129 @@ SignalH EpollST where
 -- Loop Implementation
 --------------------------------------------------------------------------------
 
-%inline
-cedeImpl : EpollST -> PrimIO () -> PrimIO ()
-cedeImpl s act w = modRef s.tasks (:< act) w
+FETCH_INTERVAL : Nat
+FETCH_INTERVAL = 16
 
-drain : EpollST -> PrimIO Bool
-drain s w = let MkIORes _ w := readEv s.spwn w in MkIORes False w
+-- drain : EpollST -> PrimIO Bool
+-- drain s w = let MkIORes _ w := readEv s.spwn w in MkIORes False w
 
-transfer : EpollST -> PrimIO Bool
-transfer s =
+poll : EpollST -> Int32 -> PrimIO ()
+poll s t w =
+  let MkIORes r w := epollWait s.epoll t w
+   in case r of
+        NoEv   => MkIORes () w
+        Ev f e =>
+          let MkIORes m w := readRef s.handles w
+              Just h      := lookup f m | Nothing => MkIORes () w
+              MkIORes _ w := primWhen h.oneShot (removeFile s f h.autoClose) w
+           in h.actOn e w
+        Err x  => trace "Polling error: \{x}" w
+
+pkg : EpollST -> PrimIO Bool
+pkg s =
   withMutex s.lock $ \w =>
-    let MkIORes (Just p) w := deq s.lock s.queue w | MkIORes _ w => drain s w
-        MkIORes _ w        := trace "Thread \{show s.nr} transfering a fiber" w
+    let MkIORes (Just p) w := deq s.outer w
+          | MkIORes _ w =>
+              let MkIORes (Left EAGAIN) w := readEv s.spwn w
+                    | MkIORes r w =>
+                        let MkIORes _ w := trace "Error when reading spawn file: got \{show r}" w
+                         in MkIORes False w
+               in MkIORes False w
         MkIORes _ w        := writeRef p.env s w
-        MkIORes _ w        := cedeImpl s p.act w
+        MkIORes _ w        := enq s.queue p.act w
+        MkIORes (Right 1) w := readEv s.spwn w
+          | MkIORes r w =>
+              let MkIORes _ w := trace "Error when reading spawn file: got \{show r}" w
+               in MkIORes True w
      in MkIORes True w
 
-
--- Polling timeout: This is 0 in case we still have tasks in the local queue,
--- otherwise it is `infinity`.
-timeout : EpollST -> PrimIO Int32
-timeout s w =
-  let MkIORes [<]   w := readRef s.tasks w | MkIORes _ w => MkIORes 0 w
-      MkIORes False w := transfer s w      | MkIORes _ w => MkIORes 0 w
-   in MkIORes (-1) w
+-- make sure we have nothing to do and have not been stopped, and
+-- if that's the case, go to sleep
+rest : EpollST -> PrimIO Work
+rest s w =
+  let MkIORes False w := pkg s w | MkIORes _ w => noWork w
+      MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
+      MkIORes _     w := poll s 1 w
+      MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
+      MkIORes _     w := pkg s w
+   in noWork w
 
 covering
-poll, runTasks : EpollST -> PrimIO ()
+run : EpollST -> Nat -> PrimIO ()
+run s 0  w =
+  let MkIORes _ w := poll s 0 w
+      MkIORes _ w := pkg s w
+   in run s FETCH_INTERVAL w
 
-covering
-onEvent : EpollST -> Bits32 -> Events -> Maybe FileHandle -> PrimIO ()
-onEvent s f es Nothing  w =
-  let MkIORes _ w := trace "Closing thread \{show s.nr}" w
-   in epollClose s.epoll w
-onEvent s f es (Just h) w =
-  let MkIORes _ w := primWhen h.oneShot (removeFile s f h.autoClose) w
-      MkIORes _ w := h.actOn es w
-   in runTasks s w
-
--- runs the given queue of IO actions. when this is done, we run the timers
-covering
-run : EpollST -> List (PrimIO ()) -> PrimIO ()
-run s []        w = poll s w
-run s (x :: xs) w =
-  let MkIORes _ w := trace "Thread \{show s.nr} processing a fiber" w
-      MkIORes _ w := x w
-   in run s xs w
-
-runTasks s w =
-  let MkIORes sa w := readRef s.tasks w
-      MkIORes _  w := writeRef s.tasks [<] w
-      MkIORes _  w := trace "Thread \{show s.nr} running \{show $ length sa} tasks" w
-   in run s (sa <>> []) w
-
-poll s w =
-  let MkIORes t w := timeout s w
-      MkIORes _ w := trace "Thread \{show s.nr} polling at timeout \{show t}" w
-      MkIORes r w := epollWait s.epoll t w
-   in case r of
-        NoEv   => runTasks s w
-        Ev f e =>
-          let MkIORes _ w := trace "Thread \{show $ s.nr} got event for \{show f}: \{show e}" w
-              MkIORes m w := readRef s.handles w
-           in onEvent s f e (lookup f m) w
-        Err x  =>
-          let MkIORes _ w := trace "Polling error: \{x}" w
-           in runTasks s w
-
-fetch : EpollST -> Events -> PrimIO ()
-fetch s es w = let MkIORes _ w := transfer s w in MkIORes () w
+run s (S k) w =
+  let MkIORes mp w := deq s.queue w
+   in case mp of
+        Nothing =>
+          let MkIORes (W _) w := rest s w | MkIORes _ w => MkIORes () w
+           in run s k w
+        Just p => let MkIORes _ w := p w in run s k w
 
 -- initialize the state of a worker thread.
 covering
-epollST : Mutex -> (cncl,spwn : EventFD) -> Ref (Queue $ Package EpollST) -> Nat -> IO EpollST
-epollST lock cncl spwn queue n = do
+epollST :
+     Mutex
+  -> (cncl,spwn : EventFD)
+  -> Ref (Queue $ Package EpollST)
+  -> Ref Alive
+  -> Nat
+  -> IO EpollST
+epollST lock cncl spwn queue alive n = do
   Right efd <- epollCreate | Left err => die "Epoll error: \{err}"
-  tasks     <- fromPrim (newRef [<])
+  tasks     <- fromPrim (newRef empty)
   handles   <- fromPrim (newRef empty)
-  let s := EST n lock spwn efd tasks queue handles
-  _         <- fromPrim $ addHandle spwn EPOLLIN EPOLLEXCLUSIVE (FH (fetch s) False False) s
+  let s := EST n lock spwn efd alive tasks queue handles
+  _         <- fromPrim $ epollAdd efd spwn EPOLLIN EPOLLEXCLUSIVE
   _         <- fromPrim $ epollAdd efd cncl EPOLLIN neutral
   pure s
 
---------------------------------------------------------------------------------
--- EventLoop Implementation
---------------------------------------------------------------------------------
+export
+record EpollPool where
+  constructor EP
+  ids   : List ThreadID
+  lock  : Mutex
+  spwn  : EventFD
+  cncl  : EventFD
+  alive : Ref Alive
+  queue : Ref (Queue $ Package EpollST)
 
-spawnImpl : Mutex -> EventFD -> Ref (Queue $ Package EpollST) -> Package EpollST -> PrimIO ()
-spawnImpl lock spwn q p =
-  withMutex lock $ \w =>
-    let MkIORes _ w := trace "Spawning a fiber" w
-        MkIORes _ w := modRef q (`enqueue` p) w
-        MkIORes _ w := writeEv spwn 1 w
-     in trace "Enqueued the fiber" w
+||| Sets the `stopped` flag of all worker threads and awaits
+||| their termination.
+export
+stop : EpollPool -> IO ()
+stop tp = do
+  primIO $ withMutex tp.lock $ \w =>
+    let MkIORes _ w := writeRef tp.alive Stop w
+     in writeEv tp.cncl (cast $ length tp.ids) w
+  traverse_ (\x => threadWait x) tp.ids
+  fromPrim $ close tp.spwn
+  fromPrim $ close tp.cncl
 
-tearDown : {n : _} -> (spwn,cncl : EventFD) -> Vect n ThreadID -> IO ()
-tearDown spwn cncl ids = do
-  _ <- fromPrim $ writeEv cncl (cast n)
-  for_ ids (\x => threadWait x)
-  fromPrim $ close spwn
-  fromPrim $ close cncl
+export
+submit : EpollPool -> Package EpollST -> PrimIO ()
+submit tp p =
+  withMutex tp.lock $ \w =>
+    let MkIORes _ w := modRef tp.queue (`enqueue` p) w
+     in writeEv tp.spwn 1 w
+
 
 export covering
 epollLoop : (n : Nat) -> (0 p : IsSucc n) => IO (EventLoop EpollST, IO ())
 epollLoop (S k) = do
   lock  <- fromPrim $ mkMutex
-  spwn  <- fromPrim $ eventfd 0 EFD_NONBLOCK
+  spwn  <- fromPrim $ eventfd 0 (EFD_SEMAPHORE <+> EFD_NONBLOCK)
   cncl  <- fromPrim $ eventfd 0 neutral
   queue <- fromPrim $ newRef empty
-  sts   <- traverse (epollST lock cncl spwn queue) (indices $ S k)
-  ts    <- for sts $ \s => fork (fromPrim $ poll s)
+  alive <- primIO (newRef Run)
+  sts   <- traverse (epollST lock cncl spwn queue alive) (indices $ S k)
+  ts    <- for sts $ \x => fork (fromPrim $ run x 0)
   putStrLn "Starting epoll loop on \{show $ S k} threads. Spawn FD: \{show $ fileDesc spwn}, cancel FD: \{show $ fileDesc cncl}"
-  pure (EL (spawnImpl lock spwn queue) cedeImpl (head sts), tearDown spwn cncl ts)
+  let tp := EP (toList ts) lock spwn cncl alive queue
+  pure (EL (submit tp) submitWork (head sts), stop tp)
 
 export covering
 app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async EpollST [] () -> IO ()
