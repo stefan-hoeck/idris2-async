@@ -62,7 +62,7 @@ submitWork s a w = enq s.queue a w
 
 pkg : WorkST -> PrimIO Bool
 pkg s w =
-  let MkIORes (Just p) w := syncDeq s.mutex s.outer w | MkIORes _ w => MkIORes False w
+  let MkIORes (Just p) w := syncDeq s.outer w | MkIORes _ w => MkIORes False w
       MkIORes _        w := writeRef p.env s w
       MkIORes _        w := enq s.queue p.act w
    in MkIORes True w

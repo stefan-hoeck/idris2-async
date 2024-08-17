@@ -199,7 +199,6 @@ record FiberST (es : List Type) (a : Type) where
 record FiberImpl (e : Type) (es : List Type) (a : Type) where
   constructor FI
   token  : Token
-  lock   : Mutex
   env    : Ref e
   st     : Ref (FiberST es a)
 
@@ -210,15 +209,14 @@ record FiberImpl (e : Type) (es : List Type) (a : Type) where
 newFiber : TokenGen => EventLoop e -> PrimIO (FiberImpl e es a)
 newFiber el w =
   let MkIORes t w := token w
-      MkIORes m w := mkMutex w
       MkIORes r w := newRef el.init w
       MkIORes s w := newRef (FS 0 [] False Running) w
-   in MkIORes (FI t m r s) w
+   in MkIORes (FI t r s) w
 
 -- remove the observer identified by the given token from the
 -- list of callbacks.
 stopObserving : Nat -> FiberImpl e es a -> PrimIO ()
-stopObserving n fbr = update fbr.lock fbr.st {cbs $= filter ((n /=) . fst)}
+stopObserving n fbr = update fbr.st {cbs $= filter ((n /=) . fst)}
 
 -- Registeres a callback at a fiber
 -- If the fiber has already terminated (it is in its `Done` state),
@@ -228,7 +226,7 @@ stopObserving n fbr = update fbr.lock fbr.st {cbs $= filter ((n /=) . fst)}
 -- observer is returned in this case.
 observe : FiberImpl e es a -> Callback es a -> PrimIO (PrimIO ())
 observe fbr cb w =
-  let MkIORes ei w := modify fbr.lock fbr.st observeAct w
+  let MkIORes ei w := modify fbr.st observeAct w
    in case ei of
         Left  act => let MkIORes _ w := act w in MkIORes primDummy w
         Right act => MkIORes act w
@@ -254,7 +252,7 @@ runCBs ((_,cb) :: xs) o w = let MkIORes _ w := cb o w in runCBs xs o w
 
 -- Finalize the fiber with the given outcome and call all its observers.
 finalize : FiberImpl e es a -> Outcome es a -> PrimIO ()
-finalize fbr o w = let MkIORes act w := modify fbr.lock fbr.st finAct w in act w
+finalize fbr o w = let MkIORes act w := modify fbr.st finAct w in act w
 
   where
     finAct : FiberST es a -> (FiberST es a, PrimIO ())
@@ -263,7 +261,7 @@ finalize fbr o w = let MkIORes act w := modify fbr.lock fbr.st finAct w in act w
 -- Cancel the given fiber, resuming its computation if it has
 -- been suspended.
 doCancel : FiberImpl e es a -> PrimIO ()
-doCancel fbr w = let MkIORes act w := modify fbr.lock fbr.st cancelAct w in act w
+doCancel fbr w = let MkIORes act w := modify fbr.st cancelAct w in act w
 
   where
     cancelAct : FiberST es a -> (FiberST es a, PrimIO ())
@@ -278,7 +276,7 @@ doCancel fbr w = let MkIORes act w := modify fbr.lock fbr.st cancelAct w in act 
 -- was faster, the fiber's state will be at `HasResult` and
 -- it will immediately be resumed.
 suspend : FiberImpl e es a -> PrimIO () -> PrimIO ()
-suspend fbr cont w = let MkIORes act w := modify fbr.lock fbr.st suspendAct w in act w
+suspend fbr cont w = let MkIORes act w := modify fbr.st suspendAct w in act w
 
   where
     suspendAct : FiberST es a -> (FiberST es a, PrimIO ())
@@ -296,7 +294,7 @@ suspend fbr cont w = let MkIORes act w := modify fbr.lock fbr.st suspendAct w in
 -- If the fiber is already `Done`, well then we are much too late
 -- and should abort silently.
 resume : FiberImpl e es a -> PrimIO ()
-resume fbr w = let MkIORes act w := modify fbr.lock fbr.st resumeAct w in act w
+resume fbr w = let MkIORes act w := modify fbr.st resumeAct w in act w
 
   where
     resumeAct : FiberST es a -> (FiberST es a, PrimIO ())
@@ -434,7 +432,7 @@ parameters {auto tg : TokenGen}
 
       Asnc f =>
         let MkIORes res  w := newRef Nothing w
-            MkIORes cncl w := f (\r,w => let MkIORes _ w := put fbr.lock res r w in resume fbr w) w
+            MkIORes cncl w := f (\r,w => let MkIORes _ w := put res r w in resume fbr w) w
          in run el (onCancel (Wait res) (primIO cncl)) cm cc fbr st w
 
       APoll t k x => case t == fbr.token && k == cm of
