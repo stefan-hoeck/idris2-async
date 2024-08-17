@@ -428,16 +428,3 @@ syncApp as = do
   el  <- sync
   tg  <- newTokenGen
   runAsync 1024 el as
--- 
--- export covering
--- app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async e [] () -> IO ()
--- app n act = do
---   tp <- mkThreadPool n
---   m  <- primIO mkMutex
---   c  <- primIO makeCondition
---   tg <- newTokenGen
---   runAsyncWith @{ec tp} 1024 act (\_ => primIO $ conditionBroadcast c)
---   primIO $ acqMutex m
---   primIO $ conditionWait c m
---   stop tp
---   usleep 100

@@ -34,7 +34,7 @@ FETCH_INTERVAL = 16
 export
 record WorkST where
   constructor W
-  mutex : Mutex
+  lock  : Mutex
   cond  : Condition
   alive : Ref Alive
 
@@ -62,7 +62,7 @@ submitWork s a w = enq s.queue a w
 
 pkg : WorkST -> PrimIO Bool
 pkg s w =
-  let MkIORes (Just p) w := syncDeq s.outer w | MkIORes _ w => MkIORes False w
+  let MkIORes (Just p) w := syncDeq s.lock s.outer w | MkIORes _ w => MkIORes False w
       MkIORes _        w := writeRef p.env s w
       MkIORes _        w := enq s.queue p.act w
    in MkIORes True w
@@ -71,10 +71,10 @@ pkg s w =
 -- if that's the case, go to sleep
 rest : WorkST -> PrimIO Work
 rest s =
-  withMutex s.mutex $ \w =>
+  withMutex s.lock $ \w =>
     let MkIORes False w := pkg s w | MkIORes _ w => noWork w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
-        MkIORes _     w := conditionWait s.cond s.mutex w
+        MkIORes _     w := conditionWait s.cond s.lock w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
         MkIORes _     w := pkg s w
      in noWork w
@@ -121,7 +121,7 @@ stop tp = do
 submit : ThreadPool -> Package WorkST -> PrimIO ()
 submit tp p =
   withMutex tp.lock $ \w =>
-    let MkIORes _ w := modRef tp.queue (`enqueue` p) w
+    let MkIORes _ w := update tp.lock tp.queue (`enqueue` p) w
      in conditionSignal tp.cond w
 
 ||| Create a new thread pool of `n` worker threads and additional thread

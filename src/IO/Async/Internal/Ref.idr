@@ -59,45 +59,51 @@ modRef r f w = let MkIORes v w := readRef r w in writeRef r (f v) w
 ||| Thread-safe modification of a mutable reference using a CAS-loop
 ||| internally
 export
-modify : Ref a -> (a -> (a,b)) -> PrimIO b
-modify (MkRef m) f w = MkIORes (assert_total $ loop) w
-  where
-    covering loop : b
-    loop =
-      let cur     := prim__readRef m
-          (new,v) := f (believe_me cur)
-       in case prim__casRef m cur (believe_me new) of
-            1 => v 
-            _ => loop
+modify : Mutex -> Ref a -> (a -> (a,b)) -> PrimIO b
+modify lock r f =
+  withMutex lock $ \w =>
+    let MkIORes v w := readRef r w
+        (v2,vb) := f v
+        MkIORes _ w := writeRef r v2 w
+     in MkIORes vb w
+-- modify (MkRef m) f w = MkIORes (assert_total $ loop) w
+--   where
+--     covering loop : b
+--     loop =
+--       let cur     := prim__readRef m
+--           (new,v) := f (believe_me cur)
+--        in case prim__casRef m cur (believe_me new) of
+--             1 => v 
+--             _ => loop
 
 export %inline
-update : Ref a -> (a -> a) -> PrimIO ()
-update r f = modify r (\v => (f v, ()))
+update : Mutex -> Ref a -> (a -> a) -> PrimIO ()
+update m r f = modify m r (\v => (f v, ()))
 
 ||| Atomically updates the current value in a mutable reference,
 ||| returning the old value as the result.
 export %inline
-getAndUpdate : Ref a -> (a -> a) -> PrimIO a
-getAndUpdate r f = modify r (\v => (f v, v))
+getAndUpdate : Mutex -> Ref a -> (a -> a) -> PrimIO a
+getAndUpdate m r f = modify m r (\v => (f v, v))
 
 ||| Atomically updates the current value in a mutable reference,
 ||| returning the updated value as the result.
 export %inline
-updateAndGet : Ref a -> (a -> a) -> PrimIO a
-updateAndGet r f = modify r (\v => let w := f v in (w,w))
+updateAndGet : Mutex -> Ref a -> (a -> a) -> PrimIO a
+updateAndGet m r f = modify m r (\v => let w := f v in (w,w))
 
 ||| Atomically sets a value if it has not already been set.
 ||| Returns the value the reference actually holds as a result.
 export %inline
-put : Ref (Maybe a) -> a -> PrimIO a
-put r v =
-  modify r $ \case
+put : Mutex -> Ref (Maybe a) -> a -> PrimIO a
+put m r v =
+  modify m r $ \case
     Just w  => (Just w, w)
     Nothing => (Just v, v)
 
 export %inline
-syncEmpty : Ref (SnocList a) -> PrimIO (SnocList a)
-syncEmpty ref = modify ref ([<],)
+syncEmpty : Mutex -> Ref (SnocList a) -> PrimIO (SnocList a)
+syncEmpty m ref = modify m ref ([<],)
 
 --------------------------------------------------------------------------------
 -- MQueue
@@ -120,8 +126,8 @@ deq ref w =
         Nothing => MkIORes Nothing w
 
 export
-syncDeq : Ref (Queue a) -> PrimIO (Maybe a)
-syncDeq ref =
-  modify ref $ \q => case dequeue q of
+syncDeq : Mutex -> Ref (Queue a) -> PrimIO (Maybe a)
+syncDeq m ref =
+  modify m ref $ \q => case dequeue q of
     Just (v,q2) => (q2, Just v)
     Nothing     => (q, Nothing)
