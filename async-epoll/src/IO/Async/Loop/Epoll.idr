@@ -27,10 +27,6 @@ import System.Linux.TimerFD
 -- Worker
 --------------------------------------------------------------------------------
 
-trace : Lazy String -> PrimIO ()
--- trace s = toPrim (putStrLn s)
-trace s = MkIORes ()
-
 FETCH_INTERVAL : Nat
 FETCH_INTERVAL = 16
 
@@ -72,7 +68,6 @@ pkg s w =
   let MkIORes (Just p) w := withMutex s.mutex (deq s.outer) w | MkIORes _ w => MkIORes False w
       MkIORes _        w := writeRef p.env s w
       MkIORes _        w := enq s.queue p.act w
-      MkIORes _        w := trace "got a pkg" w
    in MkIORes True w
 
 -- make sure we have nothing to do and have not been stopped, and
@@ -80,12 +75,9 @@ pkg s w =
 rest : WorkST -> PrimIO Work
 rest s =
   withMutex s.mutex $ \w =>
-    let MkIORes _     w := trace "should I rest?" w
-        MkIORes False w := pkg s w | MkIORes _ w => noWork w
+    let MkIORes False w := pkg s w | MkIORes _ w => noWork w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
-        MkIORes _     w := trace "going to sleep" w
         MkIORes _     w := conditionWait s.cond s.mutex w
-        MkIORes _     w := trace "woke up from sleeping" w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
         MkIORes _     w := pkg s w
      in noWork w
@@ -93,13 +85,11 @@ rest s =
 covering
 run : WorkST -> Nat -> PrimIO ()
 run s 0  w =
-  let MkIORes _ w := trace "fetching package" w
-      MkIORes _ w := pkg s w
+  let MkIORes _ w := pkg s w
    in run s FETCH_INTERVAL w
 
 run s (S k) w =
-  let MkIORes _  w := trace "reading queue" w
-      MkIORes mp w := deq s.queue w
+  let MkIORes mp w := deq s.queue w
    in case mp of
         Nothing =>
           let MkIORes (W _) w := rest s w | MkIORes _ w => MkIORes () w
@@ -125,13 +115,12 @@ record ThreadPool where
 ||| their termination.
 stop : ThreadPool -> IO ()
 stop tp = do
-  putStrLn "Shutting down poller"
   stop tp.poller
-  putStrLn "Shutting down thread pool"
   primIO $ withMutex tp.lock $ \w =>
     let MkIORes _ w := writeRef tp.alive Stop w
      in conditionBroadcast tp.cond w
   traverse_ (\x => threadWait x) tp.ids
+  usleep 100
 
 ||| Submit a new `IO` action to be processed by the worker threads
 ||| in a thread pool.
@@ -157,16 +146,20 @@ mkThreadPool (S k) = do
   pure (EL (submit tp) submitWork (head ws), stop tp)
 
 export covering
-app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async WorkST [] () -> IO ()
-app n act = do
+app :
+     (n : Nat)
+  -> {auto 0 p : IsSucc n}
+  -> List Signal
+  -> Async WorkST [] ()
+  -> IO ()
+app n sigs act = do
+  fromPrim (blockSignals sigs)
   (el,close) <- mkThreadPool n
   m  <- primIO mkMutex
   c  <- primIO makeCondition
   tg <- newTokenGen
   runAsyncWith 1024 el act (\_ => fromPrim (conditionBroadcast c))
   primIO $ withMutex m (conditionWait c m)
-  putStrLn "Done. Shutting down."
-  usleep 100
   close
 
 --------------------------------------------------------------------------------
