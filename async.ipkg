@@ -14,11 +14,15 @@ modules = IO.Async
         , IO.Async.Type
         , IO.Async.Util
 
+        , IO.Async.Loop
+        , IO.Async.Loop.SignalH
+        , IO.Async.Loop.Sync
+        , IO.Async.Loop.ThreadPool
+        , IO.Async.Loop.TimerH
+
         , IO.Async.Internal.Concurrent
-        , IO.Async.Internal.ExecutionContext
         , IO.Async.Internal.Loop
         , IO.Async.Internal.Ref
-        , IO.Async.Internal.ThreadPool
         , IO.Async.Internal.Timer
         , IO.Async.Internal.Token
 

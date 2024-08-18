@@ -4,7 +4,7 @@
 module IO.Async.Internal.Ref
 
 import Data.Queue
-import System.Concurrency
+import IO.Async.Internal.Concurrent
 
 %default total
 
@@ -94,6 +94,10 @@ put r v =
   modify r $ \case
     Just w  => (Just w, w)
     Nothing => (Just v, v)
+
+export %inline
+syncEmpty : Ref (SnocList a) -> PrimIO (SnocList a)
+syncEmpty ref = modify ref ([<],)
 
 --------------------------------------------------------------------------------
 -- MQueue

@@ -21,11 +21,9 @@ Before we start, let's import a couple of modules:
 module README
 
 import Data.List
-import Data.Nat
-import IO.Async
+import IO.Async.Loop.Epoll
 import IO.Async.Signal
 import System
-import System.Clock
 
 %default total
 ```
@@ -72,14 +70,14 @@ we define two countdowns: One for counting down seconds,
 the other counting down milliseconds (in 100 ms steps):
 
 ```idris
-countSeconds : Nat -> Async [] ()
+countSeconds : Nat -> Async WorkST [] ()
 countSeconds 0     = putStrLn "Second counter done."
 countSeconds (S k) = do
   putStrLn "\{show $ S k} s left"
   sleep 1.s
   countSeconds k
 
-countMillis : Nat -> Async [] ()
+countMillis : Nat -> Async WorkST [] ()
 countMillis 0     = putStrLn "Millisecond counter done."
 countMillis (S k) = do
   putStrLn "\{show $ S k * 100} ms left"
@@ -106,7 +104,7 @@ for a predefined amount of time.
 Let's try and run the two countdowns sequentially:
 
 ```idris
-countSequentially : Async [] ()
+countSequentially : Async WorkST [] ()
 countSequentially = do
   putStrLn "Sequential countdown:"
   countSeconds 2
@@ -147,7 +145,7 @@ to finish using `wait`. Here's the code:
 
 
 ```idris
-countParallel : Async [] ()
+countParallel : Async WorkST [] ()
 countParallel = do
   putStrLn "Concurrent countdown"
   f1 <- start $ countSeconds 2
@@ -189,7 +187,7 @@ stores their results again in a heterogeneous list (use `"par2"` as the
 command-line argument to run the next example):
 
 ```idris
-countParallel2 : Async [] ()
+countParallel2 : Async WorkST [] ()
 countParallel2 = ignore $ par [ countSeconds 2, countMillis 10 ]
 ```
 
@@ -204,16 +202,16 @@ we also add a signal handler so we can abort the program by
 entering `Ctrl-c` at the terminal:
 
 ```idris
-onSigErr : SignalError -> Async [] ()
+onSigErr : SignalError -> Async WorkST [] ()
 onSigErr (Error n) = putStrLn "Encountered signal error: \{show n}"
 
 covering
-raceParallel : Async [] ()
+raceParallel : Async WorkST [] ()
 raceParallel = do
   putStrLn "Racing countdowns"
   ignore $ race
     [ countSeconds 10000
-    , countMillis 50
+    , countMillis 600
     , onSignal SigINT (putStrLn "\nInterrupted by SigINT")
     ]
 ```
@@ -252,7 +250,7 @@ fibo 0         = 1
 fibo 1         = 1
 fibo (S $ S k) = fibo k + fibo (S k)
 
-sumFibos : Nat -> Nat -> Async [] ()
+sumFibos : Nat -> Nat -> Async WorkST [] ()
 sumFibos nr fib = do
   vs <- parTraverse (\n => lazy (fibo n)) (replicate nr fib)
   printLn (maybe 0 sum vs)
@@ -301,13 +299,13 @@ large enough to take hundreds of milliseconds at the least. In addition,
 we print ever result to get an idea of the runtime behavior:
 
 ```idris
-sumVisFibos : Nat -> Nat -> Async [] ()
+sumVisFibos : Nat -> Nat -> Async WorkST [] ()
 sumVisFibos nr fib = do
   vs <- parTraverse visFibo (replicate nr fib)
   printLn (maybe 0 sum vs)
 
   where
-    visFibo : Nat -> Async [] Nat
+    visFibo : Nat -> Async WorkST [] Nat
     visFibo n = lazy (fibo n) >>= \x => printLn x $> x
 ```
 
@@ -336,7 +334,7 @@ used to run the examples in this introduction.
 
 ```idris
 covering
-act : List String -> Async [] ()
+act : List String -> Async WorkST [] ()
 act ("par"   :: _) = countParallel
 act ("par2"  :: _) = countParallel2
 act ("race"  :: _) = raceParallel
@@ -346,11 +344,15 @@ act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
 act ("vis_fibo" :: _) = sumVisFibos 20 38
 act _              = countSequentially
 
+sigs : List String -> List Signal
+sigs ("race"  :: _) = [SigINT]
+sigs _              = []
+
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
 run threads args = do
+  for_ (sigs args) (ignore . collectSignal)
   app threads $ act args
-  usleep 100
 
 covering
 main : IO ()

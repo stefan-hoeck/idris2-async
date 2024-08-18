@@ -1,14 +1,13 @@
 module IO.Async.Util
 
 import Data.Maybe
-import IO.Async.Type
 import IO.Async.Internal.Concurrent
-import IO.Async.Internal.ExecutionContext
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Internal.ThreadPool
 import IO.Async.Internal.Token
-import System
+import IO.Async.Loop.Sync
+import IO.Async.Loop.TimerH
+import IO.Async.Type
 import System.Clock
 
 %default total
@@ -18,57 +17,57 @@ import System.Clock
 --------------------------------------------------------------------------------
 
 public export
-0 Handler : Type -> Type -> Type
-Handler a x = x -> Async [] a
+0 Handler : Type -> Type -> Type -> Type
+Handler a e x = x -> Async e [] a
 
 ||| Throws a single error by injecting it into the sum of possible errors.
 export %inline
-throw : Has e es => e -> Async es a
+throw : Has x es => x -> Async e es a
 throw = fail . inject
 
 ||| Inject an `Either e a` computation into an `Async` monad dealing
 ||| with several possible errors.
 export
-injectEither : Has e es => Either e a -> Async es a
+injectEither : Has x es => Either x a -> Async e es a
 injectEither (Left v)  = throw v
 injectEither (Right v) = succeed v
 
 ||| Inject an `IO (Either e a)` computation into an `Async` monad dealing
 ||| with several possible errors.
 export
-injectIO : Has e es => IO (Either e a) -> Async es a
+injectIO : Has x es => IO (Either x a) -> Async e es a
 injectIO = sync . map (mapFst inject)
 
 export
-handleErrors : (HSum es -> Async fs a) -> Async es a -> Async fs a
+handleErrors : (HSum es -> Async e fs a) -> Async e es a -> Async e fs a
 handleErrors f x = bind x $ either f succeed
 
 export %inline
-mapErrors : (HSum es -> HSum fs) -> Async es a -> Async fs a
+mapErrors : (HSum es -> HSum fs) -> Async e es a -> Async e fs a
 mapErrors f = handleErrors (fail . f)
 
 export %inline
-weakenErrors : Async [] a -> Async fs a
+weakenErrors : Async e [] a -> Async e fs a
 weakenErrors = believe_me -- for performance and cancelation reasons
 
 export %inline
-dropErrs : Async es () -> Async [] ()
+dropErrs : Async e es () -> Async e [] ()
 dropErrs = handleErrors (const $ succeed ())
 
 export %inline
-handle : All (Handler a) es -> Async es a -> Async [] a
+handle : All (Handler a e) es -> Async e es a -> Async e [] a
 handle hs = handleErrors (collapse' . hzipWith id hs)
 
 export %inline
-liftErrors : Async es a -> Async fs (Result es a)
+liftErrors : Async e es a -> Async e fs (Result es a)
 liftErrors = handleErrors (succeed . Left) . map Right
 
 export %inline
-liftError : Async [e] a -> Async fs (Either e a)
+liftError : Async e [e] a -> Async e fs (Either e a)
 liftError = handleErrors (pure . Left . project1) . map Right
 
 export
-embed : (onCancel : Lazy (Async es a)) ->  Outcome es a -> Async es a
+embed : (onCancel : Lazy (Async e es a)) ->  Outcome es a -> Async e es a
 embed _  (Succeeded res) = succeed res
 embed _  (Error err)     = fail err
 embed oc Canceled        = oc
@@ -80,12 +79,12 @@ embed oc Canceled        = oc
 ||| Semantically blocks the current fiber until the given fiber
 ||| produces and outcome, and returns the outcome produced.
 export %inline
-join : Fiber es a -> Async fs (Outcome es a)
+join : Fiber es a -> Async e fs (Outcome es a)
 join f = primAsync $ \cb => f.observe_ $ cb . Right
 
 ||| Awaits the termination of a fiber ignoring its outcome.
 export %inline
-wait : Fiber es a -> Async fs ()
+wait : Fiber es a -> Async e fs ()
 wait = ignore . join
 
 ||| Cancels the given fiber.
@@ -93,13 +92,13 @@ wait = ignore . join
 ||| This will semantically block the current fiber, until the target has
 ||| completed.
 export
-cancel : (target : Fiber es a) -> Async fs ()
+cancel : (target : Fiber es a) -> Async e fs ()
 cancel f = uncancelable $ \_ => primIO f.cancel_ >> ignore (join f)
 
 ||| Specifies an effect that is always invoked after evaluation of
 ||| `fa` completes, but depends on the outcome.
 export
-guaranteeCase : Async es a -> (Outcome es a -> Async [] ()) -> Async es a
+guaranteeCase : Async e es a -> (Outcome es a -> Async e [] ()) -> Async e es a
 guaranteeCase fa fin =
   uncancelable $ \poll =>
     let finalized := onCancel (poll fa) (fin Canceled)
@@ -108,7 +107,7 @@ guaranteeCase fa fin =
 ||| Specifies an effect that is always invoked after evaluation of `fa`
 ||| completes, regardless of the outcome.
 export %inline
-guarantee : Async es a -> Async [] () -> Async es a
+guarantee : Async e es a -> Async e [] () -> Async e es a
 guarantee fa = guaranteeCase fa . const
 
 ||| A pattern for safely interacting with effectful lifecycles.
@@ -123,10 +122,10 @@ guarantee fa = guaranteeCase fa . const
 ||| is cancelable by default, but can be masked.
 export
 bracketFull :
-     (acquire : Poll -> Async es a)
-  -> (use     : a -> Async es b)
-  -> (release : a -> Outcome es b -> Async [] ())
-  -> Async es b
+     (acquire : Poll e -> Async e es a)
+  -> (use     : a -> Async e es b)
+  -> (release : a -> Outcome es b -> Async e [] ())
+  -> Async e es b
 bracketFull acquire use release =
   uncancelable $ \poll => do
     v <- acquire poll
@@ -141,10 +140,10 @@ bracketFull acquire use release =
 ||| can be masked.
 export %inline
 bracketCase :
-     (acquire : Async es a)
-  -> (use     : a -> Async es b)
-  -> (release : a -> Outcome es b -> Async [] ())
-  -> Async es b
+     (acquire : Async e es a)
+  -> (use     : a -> Async e es b)
+  -> (release : a -> Outcome es b -> Async e [] ())
+  -> Async e es b
 bracketCase = bracketFull . const
 
 ||| A pattern for safely interacting with effectful lifecycles.
@@ -156,10 +155,10 @@ bracketCase = bracketFull . const
 ||| can be masked.
 export %inline
 bracket :
-     (acquire : Async es a)
-  -> (use     : a -> Async es b)
-  -> (release : a -> Async [] ())
-  -> Async es b
+     (acquire : Async e es a)
+  -> (use     : a -> Async e es b)
+  -> (release : a -> Async e [] ())
+  -> Async e es b
 bracket acquire use release = bracketCase acquire use (const . release)
 
 --------------------------------------------------------------------------------
@@ -173,9 +172,9 @@ bracket acquire use release = bracketCase acquire use (const . release)
 ||| `racePair` is a cancelation-unsafe function; it is recommended to use the safer variants.
 export
 racePair :
-     Async es a
-  -> Async fs b
-  -> Async gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
+     Async e es a
+  -> Async e fs b
+  -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
 racePair x y = do
     f1 <- start x
     f2 <- start y
@@ -190,17 +189,17 @@ racePair x y = do
 ||| fiber completes with [[Outcome.Errored]], the error is raised. If the fiber completes with
 ||| [[Outcome.Canceled]], `onCancel` is run.
 export
-joinWith : Fiber es a -> (onCancel: Lazy (Async es a)) ->  Async es a
+joinWith : Fiber es a -> (onCancel: Lazy (Async e es a)) ->  Async e es a
 joinWith f c = join f >>= embed c
 
 ||| Like `joinWith`, returning the `neutral` value of the `Monoid` in case of
 ||| cancelation.
 export
-joinWithNeutral : Monoid a => Fiber es a -> Async es a
+joinWithNeutral : Monoid a => Fiber es a -> Async e es a
 joinWithNeutral f = joinWith f (pure neutral)
 
 export
-cancelable : (act : Async es a) -> (fin : Async [] ()) -> Async es (Maybe a)
+cancelable : (act : Async e es a) -> (fin : Async e [] ()) -> Async e es (Maybe a)
 cancelable act fin =
   uncancelable $ \poll => do
     fiber <- start act
@@ -219,7 +218,7 @@ cancelable act fin =
 ||| @see
 |||   [[race]] for a simpler variant that returns the successful outcome.
 export
-raceOutcome : Async es a -> Async fs b -> Async gs (Either (Outcome es a) (Outcome fs b))
+raceOutcome : Async e es a -> Async e fs b -> Async e gs (Either (Outcome es a) (Outcome fs b))
 raceOutcome fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc,f) => cancel f $> Left oc
@@ -247,7 +246,7 @@ raceOutcome fa fb =
 ||| @see
 |||   [[raceOutcome]] for a variant that returns the outcome of the winner.
 export
-race2 : Async es a -> Async es b -> Async es (Maybe $ Either a b)
+race2 : Async e es a -> Async e es b -> Async e es (Maybe $ Either a b)
 race2 fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc,f) => case oc of
@@ -267,7 +266,7 @@ race2 fa fb =
 
 ||| This generalizes `race2` to an arbitrary heterogeneous list.
 export
-race : All (Async es) ts -> Async es (Maybe $ HSum ts)
+race : All (Async e es) ts -> Async e es (Maybe $ HSum ts)
 race []       = pure Nothing
 race [x]      = map (Just . Here) x
 race (x :: y) =
@@ -289,7 +288,7 @@ race (x :: y) =
 |||   [[both]] for a simpler variant that returns the results of both fibers.
 ||| 
 export
-bothOutcome : Async es a -> Async fs b -> Async gs (Outcome es a, Outcome fs b)
+bothOutcome : Async e es a -> Async e fs b -> Async e gs (Outcome es a, Outcome fs b)
 bothOutcome fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc, f) => (oc,) <$> onCancel (poll $ join f) (cancel f)
@@ -323,7 +322,7 @@ bothOutcome fa fb =
 ||| @see
 |||   [[bothOutcome]] for a variant that returns the [[Outcome]] of both fibers.
 export
-both : Async es a -> Async es b -> Async es (Maybe (a,b))
+both : Async e es a -> Async e es b -> Async e es (Maybe (a,b))
 both fa fb =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc, f) => case oc of
@@ -344,7 +343,7 @@ both fa fb =
 ||| Runs the given heterogeneous lists of asynchronous computations
 ||| in parallel, collecting the results again in a heterogeneous list.
 export
-par : All (Async es) ts -> Async es (Maybe $ HList ts)
+par : All (Async e es) ts -> Async e es (Maybe $ HList ts)
 par []     = pure (Just [])
 par [x]    = map (\v => Just [v]) x
 par (h::t) =
@@ -356,7 +355,7 @@ par (h::t) =
 |||
 ||| This returns `Nothing` if one of the fibers was canceled.
 export
-parTraverse : (a -> Async es b) -> List a -> Async es (Maybe $ List b)
+parTraverse : (a -> Async e es b) -> List a -> Async e es (Maybe $ List b)
 parTraverse f []     = pure (Just [])
 parTraverse f [x]    = map (Just . pure) (f x)
 parTraverse f (h::t) =
@@ -370,7 +369,7 @@ parTraverse f (h::t) =
 
 ||| Like `primAsync` but does not provide a hook for canceling.
 export
-primAsync_ : ((Result es a -> PrimIO ()) -> PrimIO ()) -> Async es a
+primAsync_ : ((Result es a -> PrimIO ()) -> PrimIO ()) -> Async e es a
 primAsync_ f =
   primAsync $ \cb,w =>
     let MkIORes _ w := f cb w
@@ -382,19 +381,26 @@ primAsync_ f =
 
 ||| Wraps a lazy value in an `Async`.
 export
-lazy : Lazy a -> Async es a
+lazy : Lazy a -> Async e es a
 lazy v = primAsync_ $ \cb => cb (Right v)
 
 ||| Delay a computation by the given number of nanoseconds.
 export
-sleep : (dur : Clock Duration) -> Async es ()
+waitTill : TimerH e => Clock Monotonic -> Async e es ()
+waitTill cl = do
+  ev <- env
+  primAsync $ \cb => primWaitTill ev cl (cb $ Right ())
+
+||| Delay a computation by the given number of nanoseconds.
+export
+sleep : TimerH e => (dur : Clock Duration) -> Async e es ()
 sleep dur = do
   now <- liftIO (clockTime Monotonic)
   waitTill (addDuration now dur)
 
 ||| Delay a computation by the given number of nanoseconds.
 export
-delay : (dur : Clock Duration) -> Async es a -> Async es a
+delay : TimerH e => (dur : Clock Duration) -> Async e es a -> Async e es a
 delay dur act = sleep dur >> act
 
 ||| Converts a number of microseconds to nanoseconds
@@ -417,21 +423,8 @@ n.ms = (n * 1000).us
 --------------------------------------------------------------------------------
 
 export covering
-syncApp : Async [] () -> IO ()
+syncApp : Async SyncST [] () -> IO ()
 syncApp as = do
-  ec  <- sync
+  el  <- sync
   tg  <- newTokenGen
-  runAsync 1024 as
-
-export covering
-app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async [] () -> IO ()
-app n act = do
-  tp <- mkThreadPool n
-  m  <- primIO mkMutex
-  c  <- primIO makeCondition
-  tg <- newTokenGen
-  runAsyncWith @{ec tp} 1024 act (\_ => primIO $ conditionBroadcast c)
-  primIO $ acqMutex m
-  primIO $ conditionWait c m
-  stop tp
-  usleep 100
+  runAsync 1024 el as

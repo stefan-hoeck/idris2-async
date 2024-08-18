@@ -1,8 +1,11 @@
 ||| Utilities for working with work loops.
 module IO.Async.Internal.Loop
 
+import Data.So
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Ref
+import System.Clock
+import System
 
 %default total
 
@@ -21,6 +24,16 @@ data Work : Type where
 export
 primDummy : PrimIO ()
 primDummy = \w => MkIORes () w
+
+||| `PrimIO` version of `die`
+export %inline
+primDie : String -> PrimIO ()
+primDie s = toPrim $ die s
+
+export %inline
+primWhen : Bool -> PrimIO () -> PrimIO ()
+primWhen True  f = f
+primWhen False _ = MkIORes ()
 
 ||| An empty work package.
 export %inline
@@ -52,6 +65,35 @@ sleepNoWork : Condition -> Mutex -> Integer -> PrimIO Work
 sleepNoWork c m us w =
   let MkIORes _ w := conditionWaitTimeout c m us w
    in noWork w
+
+||| Tail-recursively runs a list of `PrimIO` actions
+export
+runAll : (a -> PrimIO ()) -> List a -> PrimIO ()
+runAll f []        w = MkIORes () w
+runAll f (x :: xs) w = let MkIORes _ w := f x w in runAll f xs w
+
+||| Keep only those values in a list that have not yet been canceled.
+export
+nonCanceled : (a -> Ref Bool) -> List a -> PrimIO (List a)
+nonCanceled f = go [<]
+
+  where
+    go : SnocList a -> List a -> PrimIO (List a)
+    go sx []        w = MkIORes (sx <>> []) w
+    go sx (x :: xs) w =
+      let MkIORes b w := readRef (f x) w
+       in case b of
+            True  => go sx xs w
+            False => go (sx :< x) xs w
+
+||| Sleeps for the given duration (rounded down to micro seconds)
+export
+doSleep : Clock Duration -> PrimIO ()
+doSleep c w =
+  let v := cast {to = Int} (toNano c `div` 1000)
+   in case choose (v >= 0) of
+        Left x  => toPrim (usleep v) w
+        Right x => MkIORes () w
 
 ||| Boolean-like flag indicating if a loop is still alive or should
 ||| stop.

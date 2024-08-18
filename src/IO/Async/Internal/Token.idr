@@ -1,6 +1,7 @@
 ||| A unique token to identify fibers
 module IO.Async.Internal.Token
 
+import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Ref
 import Derive.Prelude
 
@@ -20,11 +21,11 @@ export
 record TokenGen where
   [noHints]
   constructor TG
-  var : Ref Nat
+  var  : Ref Nat
 
 export
 newTokenGen : IO TokenGen
-newTokenGen = TG <$> primIO (newRef 0)
+newTokenGen = [| TG (fromPrim (newRef 0)) |]
 
 ||| Generates a new unique fiber token.
 export %inline

@@ -3,16 +3,23 @@
 |||
 ||| Idle threads will try and take work packages from a shared queue, or
 ||| the will sleep until new work packages are available.
-module IO.Async.Internal.ThreadPool
+module IO.Async.Loop.ThreadPool
 
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
+
+import public Data.Nat
+import public IO.Async
+import public IO.Async.Loop
+
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Timer
+import IO.Async.Internal.Token
 import Data.List
 import Data.Queue
-import public IO.Async.Internal.ExecutionContext
-import public Data.Nat
+import Data.Vect
+
+import System
 
 %default total
 
@@ -24,16 +31,16 @@ FETCH_INTERVAL : Nat
 FETCH_INTERVAL = 16
 
 -- State of a physical worker thread in a thread-pool.
+export
 record WorkST where
   constructor W
-  mutex : Mutex
+  lock  : Mutex
   cond  : Condition
   alive : Ref Alive
-  timer : Timer
 
   -- Queue of packages this worker reads from at regular
   -- intervals or when it is otherwise idle
-  outer : Ref (Queue Package)
+  outer : Ref (Queue $ Package WorkST)
 
   -- Queue of actions to be run on this thread.
   queue : Ref (Queue $ PrimIO ())
@@ -43,23 +50,20 @@ workST :
      Mutex
   -> Condition
   -> Ref Alive
-  -> Timer
-  -> Ref (Queue Package)
+  -> Ref (Queue $ Package WorkST)
   -> IO WorkST
-workST m c s t p =
+workST m c s p =
   fromPrim $ \w =>
     let MkIORes q w := newRef empty w
-     in MkIORes (W m c s t p q) w
+     in MkIORes (W m c s p q) w
 
-submitWork : WorkST -> (k : PkgKind) -> PkgType k -> PrimIO ()
-submitWork s CPU      a w = enq s.queue a w
-submitWork s Blocking a w = enq s.queue a w
-submitWork s Timed    a w = submit s.timer a w
+submitWork : WorkST -> PrimIO () -> PrimIO ()
+submitWork s a w = enq s.queue a w
 
 pkg : WorkST -> PrimIO Bool
 pkg s w =
   let MkIORes (Just p) w := syncDeq s.outer w | MkIORes _ w => MkIORes False w
-      MkIORes _        w := writeRef p.cont (submitWork s) w
+      MkIORes _        w := writeRef p.env s w
       MkIORes _        w := enq s.queue p.act w
    in MkIORes True w
 
@@ -67,10 +71,10 @@ pkg s w =
 -- if that's the case, go to sleep
 rest : WorkST -> PrimIO Work
 rest s =
-  withMutex s.mutex $ \w =>
+  withMutex s.lock $ \w =>
     let MkIORes False w := pkg s w | MkIORes _ w => noWork w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
-        MkIORes _     w := conditionWait s.cond s.mutex w
+        MkIORes _     w := conditionWait s.cond s.lock w
         MkIORes Run   w := readRef s.alive w | MkIORes _ w => done w
         MkIORes _     w := pkg s w
      in noWork w
@@ -100,30 +104,13 @@ record ThreadPool where
   ids   : List ThreadID
   lock  : Mutex
   cond  : Condition
-  timer : Timer
   alive : Ref Alive
-  queue : Ref (Queue Package)
-
-||| Create a new thread pool of `n` worker threads and additional thread
-||| for scheduling timed tasks.
-export covering
-mkThreadPool : (n : Nat) -> {auto 0 p : IsSucc n} -> IO ThreadPool
-mkThreadPool n = do
-  m  <- primIO mkMutex
-  c  <- primIO makeCondition
-  t  <- mkTimer
-  s  <- primIO (newRef Run)
-  q  <- primIO (newRef empty)
-  ws <- sequence (replicate n $ workST m c s t q)
-  ts <- traverse (\x => fork $ fromPrim $ run x 0) ws
-  pure (TP ts m c t s q)
+  queue : Ref (Queue $ Package WorkST)
 
 ||| Sets the `stopped` flag of all worker threads and awaits
 ||| their termination.
-export
 stop : ThreadPool -> IO ()
 stop tp = do
-  stop tp.timer
   primIO $ withMutex tp.lock $ \w =>
     let MkIORes _ w := writeRef tp.alive Stop w
      in conditionBroadcast tp.cond w
@@ -131,14 +118,35 @@ stop tp = do
 
 ||| Submit a new `IO` action to be processed by the worker threads
 ||| in a thread pool.
-export
-submit : ThreadPool -> Package -> PrimIO ()
+submit : ThreadPool -> Package WorkST -> PrimIO ()
 submit tp p =
   withMutex tp.lock $ \w =>
     let MkIORes _ w := update tp.queue (`enqueue` p) w
      in conditionSignal tp.cond w
 
-||| Create an execution context from a thread pool.
-export %inline
-ec : ThreadPool -> ExecutionContext
-ec wp = EC (submit wp) (MkIORes ())
+||| Create a new thread pool of `n` worker threads and additional thread
+||| for scheduling timed tasks.
+covering
+mkThreadPool : (n : Nat) -> {auto 0 p : IsSucc n} -> IO (EventLoop WorkST, IO ())
+mkThreadPool (S k) = do
+  m  <- primIO mkMutex
+  c  <- primIO makeCondition
+  s  <- primIO (newRef Run)
+  q  <- primIO (newRef empty)
+  ws <- sequence (Vect.replicate (S k) $ workST m c s q)
+  ts <- traverse (\x => fork $ fromPrim $ run x 0) ws
+  let tp := TP (toList ts) m c s q
+  pure (EL (submit tp) submitWork (head ws), stop tp)
+
+export covering
+app : (n : Nat) -> {auto 0 p : IsSucc n} -> Async WorkST [] () -> IO ()
+app n act = do
+  (el,close) <- mkThreadPool n
+  m  <- primIO mkMutex
+  c  <- primIO makeCondition
+  tg <- newTokenGen
+  runAsyncWith 1024 el act (\_ => putStrLn "Done. Shutting down" >> fromPrim (conditionBroadcast c))
+  primIO $ acqMutex m
+  primIO $ conditionWait c m
+  close
+  usleep 100

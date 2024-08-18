@@ -7,19 +7,19 @@ import Test.Async.Spec
 val : Nat
 val = 127
 
-lifted : Async [] Nat
+lifted : Async e [] Nat
 lifted = pure val
 
-liftedAsync : Async [] Nat
+liftedAsync : Async e [] Nat
 liftedAsync = primAsync_ $ \cb => cb (Right val)
 
 compute : Nat -> Nat -> Nat -> Nat
 compute x y z = (x `minus` y) + z
 
-applied : Async [] Nat
+applied : Async e [] Nat
 applied = [| compute lifted liftedAsync lifted |]
 
-fromDo : Async [] Nat
+fromDo : Async e [] Nat
 fromDo = do
   x <- lifted
   y <- liftedAsync
@@ -30,7 +30,7 @@ square : Nat -> Nat
 square x = x * x
 
 covering
-instrs : String -> Async [] Nat -> List FlatSpecInstr
+instrs : String -> Async SyncST [] Nat -> List FlatSpecInstr
 instrs str act =
   [ Desc str `should` "be returned unchanged" `at` (assert act val)
   ,   it `should` "be returned unchanged after mapping with id" `at`
