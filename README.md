@@ -24,6 +24,7 @@ import Data.List
 import IO.Async.Loop.Epoll
 import IO.Async.Signal
 import System
+import System.Linux.SignalFD
 
 %default total
 ```
@@ -344,15 +345,14 @@ act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
 act ("vis_fibo" :: _) = sumVisFibos 20 38
 act _              = countSequentially
 
-sigs : List String -> List Signal
-sigs ("race"  :: _) = [SigINT]
-sigs _              = []
-
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
-run threads args = do
-  for_ (sigs args) (ignore . collectSignal)
-  app threads $ act args
+run threads args = app threads sigs $ act args
+  where
+    sigs : List Signal
+    sigs = case args of
+      "race"::_ => [SigINT]
+      _         => []
 
 covering
 main : IO ()

@@ -40,6 +40,14 @@ closeHandle ref w =
   let MkIORes cl w := modify ref (primDummy,) w
    in cl w
 
+public export
+record SignalHandle where
+  constructor SH
+  signal   : Signal
+  sigAct   : PrimIO ()
+  canceled : Ref Bool
+  cancel   : Ref (PrimIO ())
+
 --------------------------------------------------------------------------------
 -- Poller Run Loop
 --------------------------------------------------------------------------------
@@ -49,6 +57,7 @@ record PollerST where
   lock    : Mutex
   wakeup  : EventFD
   handles : Ref FileHandles
+  signals : Ref (SnocList SignalHandle)
   alive   : Ref Alive
   epoll   : EpollFD
 
@@ -60,10 +69,40 @@ removeFile s cl f w =
   let MkIORes _ w := epollDel s.epoll f w
    in closeHandle cl w
 
+handle :
+     {auto fd : FileDesc a}
+  -> PollerST
+  -> (file : a)
+  -> Events
+  -> Epoll.Flags
+  -> FileHandle
+  -> PrimIO (PrimIO ())
+handle s file es fs fh w =
+  let fd          := fileDesc file
+      MkIORes _ w := update s.handles (insert fd fh) w
+      MkIORes _ w := epollAdd s.epoll fd es fs w
+   in MkIORes (removeFile s fh.close fd) w
+
+registerSignal : PollerST -> SignalHandle -> PrimIO ()
+registerSignal s h =
+  withMutex s.lock $ \w =>
+    let MkIORes False w := readRef h.canceled w | MkIORes _ w => MkIORes () w
+        MkIORes fs    w := signalCreate [h.signal] neutral w
+        MkIORes cls   w := newRef (close fs) w
+        MkIORes rem   w := handle s fs EPOLLIN EPOLLET (FH (const h.sigAct) cls) w
+     in writeRef h.cancel rem w
+
+signalHandlers : PollerST -> PrimIO ()
+signalHandlers s w =
+  let MkIORes ss w := modify s.signals ([<],) w
+      MkIORes _  w := readEv s.wakeup w
+   in runAll (registerSignal s) (ss <>> []) w
+
 covering
 poll : PollerST -> PrimIO ()
 poll s w =
   let MkIORes Run w := withMutex s.lock (readRef s.alive) w | MkIORes _ w => MkIORes () w
+      MkIORes _   w := signalHandlers s w
       MkIORes r   w := epollWait s.epoll (-1) w
    in case r of
         NoEv    => poll s w
@@ -88,7 +127,6 @@ record Poller where
 export
 stop : Poller -> IO ()
 stop p = do
-  putStrLn "Stopping poller"
   fromPrim $ withMutex p.st.lock $ \w =>
     let MkIORes _ w := writeRef p.st.alive Stop w
      in writeEv p.st.wakeup 1 w
@@ -105,11 +143,12 @@ mkPoller : IO Poller
 mkPoller = do
   Right efd <- epollCreate | Left err => die "Epoll error: \{err}"
   lock      <- fromPrim mkMutex
-  wakeup    <- fromPrim (eventfd 0 neutral)
+  wakeup    <- fromPrim (eventfd 0 EFD_NONBLOCK)
   alive     <- fromPrim (newRef Run)
   handles   <- fromPrim (newRef empty)
+  signals   <- fromPrim (newRef [<])
   _         <- fromPrim (epollAdd efd wakeup EPOLLIN neutral)
-  let pst := PST lock wakeup handles alive efd
+  let pst := PST lock wakeup handles signals alive efd
   id <- fork $ fromPrim $ poll pst
   pure (P id pst)
 
@@ -117,7 +156,7 @@ mkPoller = do
 -- Interfaces
 --------------------------------------------------------------------------------
 
-export
+export %inline
 addHandle :
      {auto fd : FileDesc a}
   -> Poller
@@ -126,11 +165,7 @@ addHandle :
   -> Epoll.Flags
   -> FileHandle
   -> PrimIO (PrimIO ())
-addHandle p file es fs fh w =
-  let fd          := fileDesc file
-      MkIORes _ w := update p.st.handles (insert fd fh) w
-      MkIORes _ w := epollAdd p.st.epoll fd es fs w
-   in MkIORes (removeFile p.st fh.close fd) w
+addHandle = handle . st
 
 export
 TimerH Poller where
@@ -144,9 +179,20 @@ TimerH Poller where
                 MkIORes _   w := setTime ft (timeDifference cl now) w
              in addHandle s ft EPOLLIN neutral (FH (const f) cls) w
 
+runCancel : Mutex -> Ref Bool -> Ref (PrimIO ()) -> PrimIO ()
+runCancel lock canceled cancel w =
+  let MkIORes _ w := acqMutex lock w
+      MkIORes _ w := writeRef canceled True w
+      MkIORes f w := readRef cancel w
+      MkIORes _ w := relMutex lock w
+   in f w
+
 export
 SignalH Poller where
   primOnSignal s sig f w =
-    let MkIORes fs  w := signalCreate [sig] neutral w
-        MkIORes cls w := newRef (close fs) w
-     in addHandle s fs EPOLLIN neutral (FH (const f) cls) w
+    let MkIORes canceled w := newRef False w
+        MkIORes cancel   w := newRef (MkIORes ()) w
+        h                  := SH sig f canceled cancel
+        MkIORes _        w := update s.st.signals (:< h) w
+        MkIORes _        w := writeEv s.st.wakeup 1 w
+     in MkIORes (runCancel s.st.lock canceled cancel) w
