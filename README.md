@@ -12,7 +12,7 @@ It is recommended to use [pack](https://github.com/stefan-hoeck/idris2-pack)
 for building and running the example applications:
 
 ```sh
-pack -o async exec docs/src/README.md [args]
+pack run async-docs [args]
 ```
 
 Before we start, let's import a couple of modules:
@@ -31,9 +31,13 @@ import System.Linux.SignalFD
 
 ## Introducing the `Async` Monad
 
-This library provides a new data type `Async es a` for describing
+This library provides a new data type `Async e es a` for describing
 cancelable, asynchronous computations that can fail with one of the errors
-listed in `es` and yield a result of type `a` if all goes well.
+listed in `es` and yield a result of type `a` if all goes well. Asynchronous
+computations need to be run on an `EventLoop e`, which provides an environment
+of type `e`. This environment can make additional capabilities available.
+For instance, it can allow us to register timers, signal handlers, or
+listeners for data streams (such as pipes or sockets).
 
 Before we look at a first example, we need to get our terminology straight.
 
@@ -41,7 +45,7 @@ Before we look at a first example, we need to get our terminology straight.
   `pure` or `liftIO`: They are the typical sequential effects we know
   from the `IO` monad.
 * asynchronous: Asynchronous computations are defined using
-  `async` or `cancelableAsync` and produce their result by invoking
+  `primAsync` and produce their result by invoking
   a callback. Especially in JavaScript, many methods work asynchronously
   and will invoke a callback function once they have their result ready.
   While this allows us to continue with other work until the desired
@@ -71,14 +75,14 @@ we define two countdowns: One for counting down seconds,
 the other counting down milliseconds (in 100 ms steps):
 
 ```idris
-countSeconds : Nat -> Async WorkST [] ()
+countSeconds : TimerH e => Nat -> Async e [] ()
 countSeconds 0     = putStrLn "Second counter done."
 countSeconds (S k) = do
   putStrLn "\{show $ S k} s left"
   sleep 1.s
   countSeconds k
 
-countMillis : Nat -> Async WorkST [] ()
+countMillis : TimerH e => Nat -> Async e [] ()
 countMillis 0     = putStrLn "Millisecond counter done."
 countMillis (S k) = do
   putStrLn "\{show $ S k * 100} ms left"
@@ -97,10 +101,11 @@ when the current one has finished with a result.
 Note, however, that in the examples above there is not blocking of
 an operating system thread, even though we call `sleep`. I will explain this in
 greater detail later when we talk about `Fiber`s, but for now suffice
-to say that the `sleep` used above (from module `IO.Async.Sleep.sleep`)
+to say that the `sleep` used above (from module `IO.Async.Util`)
 is more powerful than `System.sleep` from the base library although
 they semantically do the same thing: They stop a sequence of computations
-for a predefined amount of time.
+for a predefined amount of time. Note also, that we need the `EventLoop`
+used to run our computations to provide the `TimerH` capability.
 
 Let's try and run the two countdowns sequentially:
 
@@ -116,7 +121,7 @@ You can try this example by running `main` with the `"seq"` command-line
 argument:
 
 ```sh
-> pack -o async exec docs/src/README.md seq
+> pack run async-docs seq
 Sequential countdown:
 2 s left
 1 s left
@@ -146,7 +151,7 @@ to finish using `wait`. Here's the code:
 
 
 ```idris
-countParallel : Async WorkST [] ()
+countParallel : TimerH e => Async e [] ()
 countParallel = do
   putStrLn "Concurrent countdown"
   f1 <- start $ countSeconds 2
@@ -158,12 +163,12 @@ countParallel = do
 If you try this example by running `main` with the `"par"` argument, you will
 notice that the messages from the two countdowns are now interleaved giving
 at least the illusion of concurrency. However, just like `sleep` and unlike
-`Prelude.threadWait`, `joinResult` will not block the current operating
+`Prelude.threadWait`, `wait` will not block an operating
 system thread, and other computations could still run concurrently on the
 current thread.
 
 ```sh
-> pack -o async exec docs/src/README.md par
+> pack run async-docs par
 Concurrent countdown
 1000 ms left
 2 s left
@@ -188,7 +193,7 @@ stores their results again in a heterogeneous list (use `"par2"` as the
 command-line argument to run the next example):
 
 ```idris
-countParallel2 : Async WorkST [] ()
+countParallel2 : TimerH e =>  Async e [] ()
 countParallel2 = ignore $ par [ countSeconds 2, countMillis 10 ]
 ```
 
@@ -203,16 +208,16 @@ we also add a signal handler so we can abort the program by
 entering `Ctrl-c` at the terminal:
 
 ```idris
-onSigErr : SignalError -> Async WorkST [] ()
+onSigErr : SignalError -> Async e [] ()
 onSigErr (Error n) = putStrLn "Encountered signal error: \{show n}"
 
 covering
-raceParallel : Async WorkST [] ()
+raceParallel : TimerH e => SignalH e => Async e [] ()
 raceParallel = do
   putStrLn "Racing countdowns"
   ignore $ race
     [ countSeconds 10000
-    , countMillis 600
+    , countMillis 200
     , onSignal SigINT (putStrLn "\nInterrupted by SigINT")
     ]
 ```
@@ -221,14 +226,14 @@ Running this with the `"race"` command-line argument gives the
 following output, unless it is interrupted by `Ctrl-c`:
 
 ```sh
-> pack -o async exec docs/src/README.md race
+> pack run async-docs race
 Racing countdowns
 10000 s left
-5000 ms left
-4900 ms left
+20000 ms left
+19900 ms left
 ...
 100 ms left
-9995 s left
+9980 s left
 Millisecond counter done.
 ```
 
@@ -260,7 +265,7 @@ sumFibos nr fib = do
 You can try this by running the example application like so:
 
 ```sh
-> pack -o async exec docs/src/README.md fibo 1000 20
+> pack run async-docs fibo 1000 20
 10946000
 ```
 
@@ -271,6 +276,50 @@ adventurous, try increasing the number of fibers to one million.
 This will undoubtedly consume quite a bit of memory and take more
 than a minute to terminate, but terminate it will. It would be
 unthinkable to create that number of operating system threads!
+
+However, the example above is not a typical use case for this library.
+Since these are long running CPU computations, they inadvertently block
+the threads used internally in our event loop. Here's another example
+with a more typical use case: Running a large number of timers in
+parallel. In a real application, these could be fibers trying to
+read from or write to different sockets. We do not want any system
+thread to be blocked in such a scenario since we are just waiting for
+an event to occur. As such, we want to be able to run *a lot* such
+computations in parallel:
+
+```idris
+sleepMany : TimerH e => Nat -> Async e [] ()
+sleepMany 0     = pure ()
+sleepMany (S k) =
+  ignore $
+    parTraverse
+      (\n => sleep 100.ms >> putStrLn "fiber \{show n} done")
+      [0 .. k]
+```
+
+You can try this by running the application like so:
+
+```sh
+> pack run async-docs sleep 200
+fiber 1 done
+...
+```
+
+You will note that even in case of many fibers running in parallel, the running
+time of the whole application only slightly increases due to the inner
+scheduling of fibers which is not completely free.
+
+Note: Since we use file descriptors for timers with the `epoll`-based event
+loop used to run these example applications, you might need to first increase
+the number of open file handles allowed before testing this with larger
+numbers of timers:
+
+```sh
+> ulimit -n 100000
+> pack run async-docs sleep 20000
+fiber 1 done
+...
+```
 
 ### But what about parallelism?
 
@@ -317,7 +366,7 @@ default is to use four threads):
 
 ```sh
 export IDRIS2_ASYNC_THREADS="2"
-pack -o async exec docs/src/README.md vis_fibo 10 42
+pack run async-docs vis_fibo 10 42
 ```
 
 With the arguments shown above, you will probably note
@@ -331,20 +380,25 @@ the next bunch of computations start.
 ## The `main` function
 
 This final sections only shows the `main` functions and a few utilities
-used to run the examples in this introduction.
+used to run the examples in this introduction. Currently, the event
+loop from `IO.Async.Loop.Epoll` is used to run this. This makes use of
+`epoll` internally, which is only available under Linux.
 
 ```idris
 covering
 act : List String -> Async WorkST [] ()
-act ("par"   :: _) = countParallel
-act ("par2"  :: _) = countParallel2
-act ("race"  :: _) = raceParallel
-act ["fibo",x,y]   = sumFibos (cast x) (cast y)
-act ("fibo" :: _)  = sumFibos 1000 30
-act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
+act ("par"   :: _)    = countParallel
+act ("par2"  :: _)    = countParallel2
+act ("race"  :: _)    = raceParallel
+act ["fibo",x,y]      = sumFibos (cast x) (cast y)
+act ("fibo" :: _)     = sumFibos 1000 30
+act ["vis_fibo",x,y]  = sumVisFibos (cast x) (cast y)
 act ("vis_fibo" :: _) = sumVisFibos 20 38
-act _              = countSequentially
+act ["sleep",x]       = sleepMany (cast x)
+act ("sleep" :: _)    = sleepMany 100
+act _                 = countSequentially
 
+-- `sigs` is used to block the default handling of the listed signals.
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
 run threads args = app threads sigs $ act args
