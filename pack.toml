@@ -16,6 +16,6 @@ ipkg = "docs.ipkg"
 
 [custom.all.epoll]
 type   = "git"
-url    = "git@github.com:stefan-hoeck/idris2-epoll"
+url    = "https://github.com/stefan-hoeck/idris2-epoll"
 commit = "latest:main"
 ipkg   = "epoll.ipkg"
