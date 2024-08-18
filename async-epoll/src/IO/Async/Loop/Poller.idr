@@ -35,9 +35,9 @@ record FileHandle where
 0 FileHandles : Type
 FileHandles = SortedMap Bits32 FileHandle
 
-closeHandle : Mutex -> Ref (PrimIO ()) -> PrimIO ()
-closeHandle m ref w =
-  let MkIORes cl w := modify m ref (primDummy,) w
+closeHandle : Ref (PrimIO ()) -> PrimIO ()
+closeHandle ref w =
+  let MkIORes cl w := modify ref (primDummy,) w
    in cl w
 
 --------------------------------------------------------------------------------
@@ -53,12 +53,12 @@ record PollerST where
   epoll   : EpollFD
 
 getHandle : PollerST -> Bits32 -> PrimIO (Maybe FileHandle)
-getHandle s f = modify s.lock s.handles $ \m => (delete f m, lookup f m)
+getHandle s f = modify s.handles $ \m => (delete f m, lookup f m)
 
 removeFile : PollerST -> Ref (PrimIO ()) -> Bits32 -> PrimIO ()
 removeFile s cl f w =
   let MkIORes _ w := epollDel s.epoll f w
-   in closeHandle s.lock cl w
+   in closeHandle cl w
 
 covering
 poll : PollerST -> PrimIO ()
@@ -71,7 +71,6 @@ poll s w =
           let MkIORes (Just h) w := getHandle s f w | MkIORes _ w => poll s w
               MkIORes _        w := removeFile s h.close f w
               MkIORes _        w := h.actOn es w
-              MkIORes _        w := toPrim (putStrLn "got event from \{show f}") w
            in poll s w
         Err x   => primDie "Epoll error: \{show x}" w
 
@@ -129,7 +128,7 @@ addHandle :
   -> PrimIO (PrimIO ())
 addHandle p file es fs fh w =
   let fd          := fileDesc file
-      MkIORes _ w := update p.st.lock p.st.handles (insert fd fh) w
+      MkIORes _ w := update p.st.handles (insert fd fh) w
       MkIORes _ w := epollAdd p.st.epoll fd es fs w
    in MkIORes (removeFile p.st fh.close fd) w
 
@@ -148,7 +147,6 @@ TimerH Poller where
 export
 SignalH Poller where
   primOnSignal s sig f w =
-    let MkIORes _   w := blockSignals [sig] w
-        MkIORes fs  w := signalCreate [sig] neutral w
+    let MkIORes fs  w := signalCreate [sig] neutral w
         MkIORes cls w := newRef (close fs) w
      in addHandle s fs EPOLLIN neutral (FH (const f) cls) w

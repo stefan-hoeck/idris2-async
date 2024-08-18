@@ -62,7 +62,7 @@ submitWork s a w = enq s.queue a w
 
 pkg : WorkST -> PrimIO Bool
 pkg s w =
-  let MkIORes (Just p) w := syncDeq s.lock s.outer w | MkIORes _ w => MkIORes False w
+  let MkIORes (Just p) w := syncDeq s.outer w | MkIORes _ w => MkIORes False w
       MkIORes _        w := writeRef p.env s w
       MkIORes _        w := enq s.queue p.act w
    in MkIORes True w
@@ -121,7 +121,7 @@ stop tp = do
 submit : ThreadPool -> Package WorkST -> PrimIO ()
 submit tp p =
   withMutex tp.lock $ \w =>
-    let MkIORes _ w := update tp.lock tp.queue (`enqueue` p) w
+    let MkIORes _ w := update tp.queue (`enqueue` p) w
      in conditionSignal tp.cond w
 
 ||| Create a new thread pool of `n` worker threads and additional thread

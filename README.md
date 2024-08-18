@@ -211,7 +211,7 @@ raceParallel = do
   putStrLn "Racing countdowns"
   ignore $ race
     [ countSeconds 10000
-    , countMillis 50
+    , countMillis 600
     , onSignal SigINT (putStrLn "\nInterrupted by SigINT")
     ]
 ```
@@ -344,11 +344,15 @@ act ["vis_fibo",x,y] = sumVisFibos (cast x) (cast y)
 act ("vis_fibo" :: _) = sumVisFibos 20 38
 act _              = countSequentially
 
+sigs : List String -> List Signal
+sigs ("race"  :: _) = [SigINT]
+sigs _              = []
+
 covering
 run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
 run threads args = do
+  for_ (sigs args) (ignore . collectSignal)
   app threads $ act args
-  usleep 100
 
 covering
 main : IO ()
