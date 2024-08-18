@@ -331,14 +331,14 @@ physical cores?
 The answer to that depends on the backend we use. This example
 application is supposed to be run on one of Idris's Scheme backends,
 and can thus make use of more than one physical core. The core function for
-running an `Async` computation is `IO.Async.Fiber.runAsyncWith`, which
-takes an `ExecutionContext` as an implicit argument.
+running an `Async` computation is `IO.Async.Type.runAsyncWith`, which
+takes an `EventLoop e` as its first argument.
 
-An `ExecutaionContext`'s main functionality is to provide function
-`submit`, which allows us to enqueue an arbitrary `IO` action that
+An `EventLoop`'s main functionality is to provide function
+`spawn`, which allows us to enqueue an arbitrary `PrimIO` action that
 will then be processed by the execution context. One implementation
-of this type is provided in module `IO.Async.ThreadPool`, which - just
-as the name implies - uses a fixed-size pool of operating system
+of this type is provided in module `IO.Async.Loop.Epoll`, which
+uses a fixed-size pool of operating system
 threads to process the enqueued `IO` actions. If the number of
 threads is greater than one, we get true parallelism when processing
 more than one fiber at a time.
