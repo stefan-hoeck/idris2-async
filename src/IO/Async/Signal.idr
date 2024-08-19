@@ -8,11 +8,15 @@ import IO.Async.Util
 %default total
 
 export %inline
-awaitSignal : SignalH e => Signal -> Async e es ()
-awaitSignal s = do
+awaitSignals : SignalH e => List Signal -> Async e es Signal
+awaitSignals s = do
   ev <- env
-  primAsync $ \cb => primOnSignal ev s (cb $ Right ())
+  primAsync $ \cb => primOnSignals ev s (cb . Right)
+
+export %inline
+onSignals : SignalH e => List Signal -> Async e es a -> Async e es a
+onSignals s act = ignore (awaitSignals s) >> act
 
 export %inline
 onSignal : SignalH e => Signal -> Async e es a -> Async e es a
-onSignal s act = awaitSignal s >> act
+onSignal = onSignals . pure

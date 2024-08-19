@@ -6,4 +6,4 @@ import public System.Signal
 
 public export
 interface SignalH a where
-  primOnSignal : a -> Signal -> PrimIO () -> PrimIO (PrimIO ())
+  primOnSignals : a -> List Signal -> (Signal -> PrimIO ()) -> PrimIO (PrimIO ())
