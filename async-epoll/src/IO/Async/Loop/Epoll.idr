@@ -183,4 +183,4 @@ TimerH WorkST where
 
 export
 SignalH WorkST where
-  primOnSignal s = primOnSignal s.poller
+  primOnSignals s = primOnSignals s.poller

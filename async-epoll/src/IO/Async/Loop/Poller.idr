@@ -43,8 +43,8 @@ closeHandle ref w =
 public export
 record SignalHandle where
   constructor SH
-  signal   : Signal
-  sigAct   : PrimIO ()
+  signals  : List Signal
+  sigAct   : Signal -> PrimIO ()
   canceled : Ref Bool
   cancel   : Ref (PrimIO ())
 
@@ -83,13 +83,19 @@ handle s file es fs fh w =
       MkIORes _ w := epollAdd s.epoll fd es fs w
    in MkIORes (removeFile s fh.close fd) w
 
+sig : SignalFD -> (Signal -> PrimIO ()) -> Events -> PrimIO ()
+sig fs act _ w =
+  let MkIORes (Right v) w := readSignal fs w   | MkIORes _ w => MkIORes () w
+      Just s              := toSignal (cast v) | Nothing => MkIORes () w
+   in act s w
+
 registerSignal : PollerST -> SignalHandle -> PrimIO ()
 registerSignal s h =
   withMutex s.lock $ \w =>
     let MkIORes False w := readRef h.canceled w | MkIORes _ w => MkIORes () w
-        MkIORes fs    w := signalCreate [h.signal] neutral w
+        MkIORes fs    w := signalCreate h.signals neutral w
         MkIORes cls   w := newRef (close fs) w
-        MkIORes rem   w := handle s fs EPOLLIN EPOLLET (FH (const h.sigAct) cls) w
+        MkIORes rem   w := handle s fs EPOLLIN EPOLLET (FH (sig fs h.sigAct) cls) w
      in writeRef h.cancel rem w
 
 signalHandlers : PollerST -> PrimIO ()
@@ -189,10 +195,10 @@ runCancel lock canceled cancel w =
 
 export
 SignalH Poller where
-  primOnSignal s sig f w =
+  primOnSignals s sigs f w =
     let MkIORes canceled w := newRef False w
         MkIORes cancel   w := newRef (MkIORes ()) w
-        h                  := SH sig f canceled cancel
+        h                  := SH sigs f canceled cancel
         MkIORes _        w := update s.st.signals (:< h) w
         MkIORes _        w := writeEv s.st.wakeup 1 w
      in MkIORes (runCancel s.st.lock canceled cancel) w
