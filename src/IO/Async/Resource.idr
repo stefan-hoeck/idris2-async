@@ -1,23 +1,23 @@
 module IO.Async.Resource
 
 import Data.List.Quantifiers.Extra
+import IO.Async.Type
+import IO.Async.Util
 
 %default total
 
--- public export
--- interface Resource a where
---   release : HasIO io => a -> io ()
--- 
--- export
--- useMany :
---      {auto rs : All Resource ts}
---   -> All (Async es) ts
---   -> (HList ts -> Async es a)
---   -> Async es a
--- useMany           []        f = f []
--- useMany @{_ :: _} (v :: vs) f =
---   bracket v (\rv => useMany vs $ f . (rv::)) release
--- 
--- export %inline
--- use1 : Resource v => Async es v -> (v -> Async es a) -> Async es a
--- use1 x f = bracket x f release
+public export
+interface Resource a where
+  cleanup : a -> Async e [] ()
+
+||| Allocate a resource, use it in a program, and make sure to release it
+||| afterwards.
+export %inline
+use1 : Resource a => Async e es a -> (a -> Async e es b) -> Async e es b
+use1 alloc run = alloc >>= \r => guarantee (run r) (cleanup r)
+
+||| Like `use1` but for a heterogeneous list of resources.
+export
+use : All Resource ts => All (Async e es) ts -> (HList ts -> Async e es b) -> Async e es b
+use @{[]}   []     run = run []
+use @{_::_} (h::t) run = use1 h (\r => use t (run . (r::)))
