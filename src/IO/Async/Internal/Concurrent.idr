@@ -1,6 +1,9 @@
 ||| Concurrency primitives in `PrimIO`
 module IO.Async.Internal.Concurrent
 
+import Data.Array
+import IO.Async.Loop
+
 %default total
 
 --------------------------------------------------------------------------------
@@ -20,12 +23,16 @@ export %foreign "scheme:blodwen-mutex-release"
 relMutex : Mutex -> PrimIO ()
 
 export %inline
-withMutex : Mutex -> PrimIO b -> PrimIO b
-withMutex m f w =
-  let MkIORes _  w := acqMutex m w
-      MkIORes vb w := f w
-      MkIORes _  w := relMutex m w
-   in MkIORes vb w
+withLock : Mutex -> IO1 b -> IO1 b
+withLock m f t =
+  let _  # t := toF1 (acqMutex m) t
+      vb # t := f t
+      _  # t := toF1 (relMutex m) t
+   in vb # t
+
+export %inline
+withLockAt : IArray n Mutex -> Fin n -> IO1 b -> IO1 b
+withLockAt ms x = withLock (ms `at` x)
 
 --------------------------------------------------------------------------------
 -- Condition
