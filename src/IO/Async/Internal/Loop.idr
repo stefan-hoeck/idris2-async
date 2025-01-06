@@ -60,37 +60,36 @@ work w t = W w # t
 -- sleepNoWork c m us w =
 --   let MkIORes _ w := conditionWaitTimeout c m us w
 --    in noWork w
--- 
--- ||| Tail-recursively runs a list of `IO1` actions
--- export
--- runAll : (a -> IO1 ()) -> List a -> IO1 ()
--- runAll f []        w = MkIORes () w
--- runAll f (x :: xs) w = let MkIORes _ w := f x w in runAll f xs w
--- 
--- ||| Keep only those values in a list that have not yet been canceled.
--- export
--- nonCanceled : (a -> Ref Bool) -> List a -> IO1 (List a)
--- nonCanceled f = go [<]
--- 
---   where
---     go : SnocList a -> List a -> IO1 (List a)
---     go sx []        w = MkIORes (sx <>> []) w
---     go sx (x :: xs) w =
---       let MkIORes b w := readRef (f x) w
---        in case b of
---             True  => go sx xs w
---             False => go (sx :< x) xs w
--- 
--- ||| Sleeps for the given duration (rounded down to micro seconds)
--- export
--- doSleep : Clock Duration -> IO1 ()
--- doSleep c w =
---   let v := cast {to = Int} (toNano c `div` 1000)
---    in case choose (v >= 0) of
---         Left x  => toPrim (usleep v) w
---         Right x => MkIORes () w
--- 
--- ||| Boolean-like flag indicating if a loop is still alive or should
--- ||| stop.
--- public export
--- data Alive = Stop | Run
+
+||| Tail-recursively runs a list of `IO1` actions
+export
+runAll : (a -> IO1 ()) -> List a -> IO1 ()
+runAll f []        t = () # t
+runAll f (x :: xs) t = let _ # t := f x t in runAll f xs t
+
+||| Keep only those values in a list that have not yet been canceled.
+export
+nonCanceled : (a -> IORef Bool) -> List a -> IO1 (List a)
+nonCanceled f = go [<]
+
+  where
+    go : SnocList a -> List a -> IO1 (List a)
+    go sx []        t = (sx <>> []) # t
+    go sx (x :: xs) t =
+      case read1 (f x) t of
+        True  # t => go sx xs t
+        False # t => go (sx :< x) xs t
+
+||| Sleeps for the given duration (rounded down to micro seconds)
+export
+doSleep : Clock Duration -> IO1 ()
+doSleep c t =
+  let v := cast {to = Int} (toNano c `div` 1000)
+   in case choose (v >= 0) of
+        Left x  => ioToF1 (usleep v) t
+        Right x => () # t
+
+||| Boolean-like flag indicating if a loop is still alive or should
+||| stop.
+public export
+data Alive = Stop | Run

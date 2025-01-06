@@ -22,15 +22,12 @@ record TokenGen where
   [noHints]
   constructor TG
   var : IORef Nat
-  mut : Mutex
 
 export
 newTokenGen : IO TokenGen
-newTokenGen = [| TG (newIORef 0) (fromPrim mkMutex) |]
+newTokenGen = [| TG (newIORef 0) |]
 
 ||| Generates a new unique fiber token.
 export %inline
 token : (g : TokenGen) => IO1 Token
-token t =
-  let n # t := withLock g.mut (readAndMod1 g.var S) t
-   in T n # t
+token = casupdate1 g.var (\n => (n+1, T n))

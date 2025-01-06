@@ -1,6 +1,5 @@
 module Test.Async.Cancel
 
-import Data.IORef
 import Derive.Prelude
 import Test.Async.Spec
 
@@ -19,7 +18,7 @@ data Event : Type where
 parameters {auto ref : IORef (SnocList Event)}
 
   fire : Event -> Async e [] ()
-  fire e = modifyIORef ref (:< e) >> cede
+  fire e = runIO (mod1 ref (:< e)) >> cede
 
   tick : Async e [] ()
   tick = fire Tick
@@ -76,7 +75,7 @@ run f = do
   ref <- newIORef [<]
   fbr <- start (f @{ref})
   ignore $ join fbr
-  map (<>> []) (readIORef ref)
+  map (<>> []) (runIO (read1 ref))
 
 covering
 instrs : List FlatSpecInstr

@@ -93,7 +93,7 @@ wait = ignore . join
 ||| completed.
 export
 cancel : (target : Fiber es a) -> Async e fs ()
-cancel f = uncancelable $ \_ => primIO f.cancel_ >> ignore (join f)
+cancel f = uncancelable $ \_ => runIO f.cancel_ >> ignore (join f)
 
 ||| Specifies an effect that is always invoked after evaluation of
 ||| `fa` completes, but depends on the outcome.
@@ -178,10 +178,10 @@ racePair :
 racePair x y = do
     f1 <- start x
     f2 <- start y
-    flip onCancel (cancel f1 >> cancel f2) $ primAsync $ \cb,w =>
-      let MkIORes c1 w := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) w
-          MkIORes c2 w := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) w
-       in MkIORes (\x => let MkIORes _ x := c1 x in c2 x) w
+    flip onCancel (cancel f1 >> cancel f2) $ primAsync $ \cb,t =>
+      let c1 # t := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) t
+          c2 # t := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) t
+       in (\x => let _ # x := c1 x in c2 x) # t
 
 ||| Awaits the completion of the bound fiber and returns its result once it completes.
 ||| 
@@ -369,11 +369,11 @@ parTraverse f (h::t) =
 
 ||| Like `primAsync` but does not provide a hook for canceling.
 export
-primAsync_ : ((Result es a -> PrimIO ()) -> PrimIO ()) -> Async e es a
+primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
 primAsync_ f =
-  primAsync $ \cb,w =>
-    let MkIORes _ w := f cb w
-     in MkIORes primDummy w
+  primAsync $ \cb,t =>
+    let _ # t := f cb t
+     in dummy # t
 
 --------------------------------------------------------------------------------
 -- Sleeping and Timed Execution
