@@ -4,9 +4,8 @@ authors = "stefan-hoeck"
 brief   = "An epoll-based event loop for asynchronous computations on Linux"
 
 depends = async
-        , epoll
+        , linux
 
 modules = IO.Async.Loop.Epoll
-        , IO.Async.Loop.Poller
 
 sourcedir = "src"

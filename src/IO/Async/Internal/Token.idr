@@ -21,15 +21,13 @@ export
 record TokenGen where
   [noHints]
   constructor TG
-  var  : Ref Nat
+  var : IORef Nat
 
 export
 newTokenGen : IO TokenGen
-newTokenGen = [| TG (fromPrim (newRef 0)) |]
+newTokenGen = [| TG (newIORef 0) |]
 
 ||| Generates a new unique fiber token.
 export %inline
-token : (g : TokenGen) => PrimIO Token
-token w =
-  let MkIORes n w := getAndUpdate g.var S w
-   in MkIORes (T n) w
+token : (g : TokenGen) => IO1 Token
+token = casupdate1 g.var (\n => (n+1, T n))

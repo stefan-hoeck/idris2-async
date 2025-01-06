@@ -1,6 +1,5 @@
 module Test.Async.Cancel
 
-import Data.IORef
 import Derive.Prelude
 import Test.Async.Spec
 
@@ -18,26 +17,26 @@ data Event : Type where
 
 parameters {auto ref : IORef (SnocList Event)}
 
-  fire : Event -> Async e [] ()
-  fire e = modifyIORef ref (:< e) >> cede
+  fire : Event -> Async e es ()
+  fire e = runIO (mod1 ref (:< e)) >> cede
 
-  tick : Async e [] ()
+  tick : Async e es ()
   tick = fire Tick
 
-  tock : Async e [] ()
+  tock : Async e es ()
   tock = fire Tock
 
-  tack : Async e [] ()
+  tack : Async e es ()
   tack = fire Tack
 
-  onCncl : Async e [] a -> Async e [] a
+  onCncl : Async e es a -> Async e es a
   onCncl v = onCancel v (fire Canceled)
 
-  onCnclB : Bool -> Async e [] a -> Async e [] a
+  onCnclB : Bool -> Async e es a -> Async e es a
   onCnclB True  v = onCncl v
   onCnclB False v = v
 
-  tickTackTock : (cancel, masked : Bool) -> Async e [] ()
+  tickTackTock : (cancel, masked : Bool) -> Async e es ()
   tickTackTock True True  =
     uncancelable (\_ => tick >> canceled >> tack) >> tock
   tickTackTock False True  =
@@ -47,36 +46,36 @@ parameters {auto ref : IORef (SnocList Event)}
   tickTackTock False False  =
     tick >> tack >> tock
 
-  tickTackTockPolled : (cancel : Bool) -> Async e [] ()
+  tickTackTockPolled : (cancel : Bool) -> Async e es ()
   tickTackTockPolled True =
     uncancelable (\p => tick >> canceled >> tack >> p (tock >> tack)) >> tock
   tickTackTockPolled False =
     uncancelable (\p => tick >> tack >> p (tock >> tack)) >> tock
 
-  tickTackTockUCBoundary : Async e [] ()
+  tickTackTockUCBoundary : Async e es ()
   tickTackTockUCBoundary =
     uncancelable (\_ => tick >> canceled >> tack) >> uncancelable (\_ => tock)
 
-  tickTackTockUCSkipBoundary : Async e [] ()
+  tickTackTockUCSkipBoundary : Async e es ()
   tickTackTockUCSkipBoundary =
     uncancelable (\_ => tick >> canceled >> tack) >>
     pure () >>
     uncancelable (\_ => tock)
 
 
-  outer : (oncncl : Bool) -> Async e [] () -> Async e [] ()
+  outer : (oncncl : Bool) -> Async e es () -> Async e es ()
   outer o act = do
     fbr <- start (onCnclB o act)
     -- fbr <- start (onCnclB o $ tickTackTock False m)
     cede
     cancel fbr
 
-run : (IORef (SnocList Event) => Async e [] ()) -> Async e [] (List Event)
+run : (IORef (SnocList Event) => Async e es ()) -> Async e es (List Event)
 run f = do
   ref <- newIORef [<]
   fbr <- start (f @{ref})
   ignore $ join fbr
-  map (<>> []) (readIORef ref)
+  map (<>> []) (runIO (read1 ref))
 
 covering
 instrs : List FlatSpecInstr

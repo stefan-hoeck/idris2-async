@@ -4,11 +4,14 @@ authors = "stefan-hoeck"
 brief   = "Asynchronous and concurrent computations in Idris2"
 
 depends = base >= 0.7.0
+        , array
         , containers
+        , posix
         , quantifiers-extra
 
 modules = IO.Async
         , IO.Async.Outcome
+        , IO.Async.Posix
         , IO.Async.Resource
         , IO.Async.Signal
         , IO.Async.Type

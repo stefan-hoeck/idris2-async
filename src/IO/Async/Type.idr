@@ -12,13 +12,13 @@ import public IO.Async.Outcome
 
 public export
 0 Callback : List Type -> Type -> Type
-Callback es a = Outcome es a -> PrimIO ()
+Callback es a = Outcome es a -> IO1 ()
 
 public export
 record Fiber (es : List Type) (a : Type) where
   constructor MkFiber
-  cancel_  : PrimIO ()
-  observe_ : Callback es a -> PrimIO (PrimIO ())
+  cancel_  : IO1 ()
+  observe_ : Callback es a -> IO1 (IO1 ())
 
 export
 data Async : (e : Type) -> (es : List Type) -> Type -> Type where
@@ -50,14 +50,14 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 
   Start : Async e es a -> Async e fs (Fiber es a)
 
-  Asnc   : ((Result es a -> PrimIO ()) -> PrimIO (PrimIO ())) -> Async e es a
+  Asnc   : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 
   -- Temporarily undo a layer of uncancelability
   APoll  : Token -> Nat -> Async e es a -> Async e es a
 
   -- Internal checking if asynchronous results are available.
   -- We only check after we have been notified that a result is ready.
-  Wait : Ref (Maybe $ Result es a) -> Async e es a
+  Wait : IORef (Maybe $ Result es a) -> Async e es a
 
 --------------------------------------------------------------------------------
 -- Primitives
@@ -100,10 +100,10 @@ uncancelable f = UC $ \t,n => f (APoll t n)
 
 ||| Asynchronous FFI: Wraps a callback handler into `Async`.
 |||
-||| The `PrimIO ()` action returned after registering the callback will
+||| The `IO1 ()` action returned after registering the callback will
 ||| be used for cancelation.
 export %inline
-primAsync : ((Result es a -> PrimIO ()) -> PrimIO (PrimIO ())) -> Async e es a
+primAsync : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 primAsync = Asnc
 
 ||| Starts a new fiber, running it concurrently to the current one
@@ -165,7 +165,7 @@ emptyCBs _ _ = []
 --
 --   2) Suspended: The fiber has been suspended because it is waiting for
 --                 the result of an asynchronous computation. Once that is ready
---                 it can be resumed by invoking the given `PrimIO` action.
+--                 it can be resumed by invoking the given `IO1` action.
 --
 --   3) HasResult: The result of an asynchronous call is ready but the fiber
 --                 is currently running. It should immediately continue upon
@@ -179,16 +179,11 @@ emptyCBs _ _ = []
 --   4) Done:      The fiber has terminated and produced the wrapped outcome.
 data FiberState : (es : List Type) -> (a : Type) -> Type where
   Running   : FiberState es a
-  Suspended : PrimIO () -> FiberState es a
+  Suspended : IO1 () -> FiberState es a
   HasResult : FiberState es a
   Done      : Outcome es a -> FiberState es a
 
--- Implementation of a `Fiber`
---
--- We use a `TokenGen` to identify observers, a `Token` to
--- identify the fiber during polls, a `Mutex` for synchronizing
--- state updates, and several mutable references representing the
--- fiber's current state.
+-- State of a `Fiber`
 record FiberST (es : List Type) (a : Type) where
   constructor FS
   ix       : Nat
@@ -199,24 +194,21 @@ record FiberST (es : List Type) (a : Type) where
 record FiberImpl (e : Type) (es : List Type) (a : Type) where
   constructor FI
   token  : Token
-  env    : Ref e
-  st     : Ref (FiberST es a)
-
--- subDummy : (k : PkgKind) -> PkgType k -> PrimIO ()
--- subDummy = \_,_ => primDummy
+  env    : IORef e
+  st     : IORef (FiberST es a)
 
 -- allocates a new fiber, setting its initial state to `Running`
-newFiber : TokenGen => EventLoop e -> PrimIO (FiberImpl e es a)
-newFiber el w =
-  let MkIORes t w := token w
-      MkIORes r w := newRef el.init w
-      MkIORes s w := newRef (FS 0 [] False Running) w
-   in MkIORes (FI t r s) w
+newFiber : TokenGen => EventLoop e -> IO1 (FiberImpl e es a)
+newFiber el t =
+  let tok  # t := Token.token t
+      env  # t := refIO el.init t
+      st   # t := refIO (FS 0 [] False Running) t
+   in FI tok env st # t
 
 -- remove the observer identified by the given token from the
 -- list of callbacks.
-stopObserving : Nat -> FiberImpl e es a -> PrimIO ()
-stopObserving n fbr = update fbr.st {cbs $= filter ((n /=) . fst)}
+stopObserving : Nat -> FiberImpl e es a -> IO1 ()
+stopObserving n fbr = casmod1 fbr.st {cbs $= filter ((n /=) . fst)}
 
 -- Registeres a callback at a fiber
 -- If the fiber has already terminated (it is in its `Done` state),
@@ -224,14 +216,13 @@ stopObserving n fbr = update fbr.st {cbs $= filter ((n /=) . fst)}
 -- Otherwise, the callback is given a unique identifier and added to
 -- the fiber's list of callbacks. A cancel hook for removing the
 -- observer is returned in this case.
-observe : FiberImpl e es a -> Callback es a -> PrimIO (PrimIO ())
-observe fbr cb w =
-  let MkIORes ei w := modify fbr.st observeAct w
-   in case ei of
-        Left  act => let MkIORes _ w := act w in MkIORes primDummy w
-        Right act => MkIORes act w
+observe : FiberImpl e es a -> Callback es a -> IO1 (IO1 ())
+observe fbr cb t =
+  case casupdate1 fbr.st observeAct t of
+    Left  act # t => let _ # t := act t in dummy # t
+    Right act # t => act # t
   where
-    observeAct : FiberST es a -> (FiberST es a, (Either (PrimIO ()) (PrimIO ())))
+    observeAct : FiberST es a -> (FiberST es a, (Either (IO1 ()) (IO1 ())))
     observeAct s =
       case s.state of
         Done o => (s, Left $ cb o)
@@ -240,50 +231,54 @@ observe fbr cb w =
           in (s2, Right $ stopObserving s.ix fbr)
 
 -- Cede control to the physical thread this fiber is running on
-cedeFbr : EventLoop e -> FiberImpl e es a -> PrimIO () -> PrimIO ()
-cedeFbr el fbr act w =
-  let MkIORes ev w := readRef fbr.env w
-   in el.cede ev act w
+cedeFbr : EventLoop e -> FiberImpl e es a -> IO1 () -> IO1 ()
+cedeFbr el fbr act = el.cede (Pkg fbr.env act)
 
 -- runs a list of callbacks
-runCBs : List (Nat,Callback es a) -> Outcome es a -> PrimIO ()
-runCBs []             o w = MkIORes () w
-runCBs ((_,cb) :: xs) o w = let MkIORes _ w := cb o w in runCBs xs o w
+runCBs : List (Nat,Callback es a) -> Outcome es a -> IO1 ()
+runCBs []             o t = () # t
+runCBs ((_,cb) :: xs) o t = let _ # t := cb o t in runCBs xs o t
 
 -- Finalize the fiber with the given outcome and call all its observers.
-finalize : FiberImpl e es a -> Outcome es a -> PrimIO ()
-finalize fbr o w = let MkIORes act w := modify fbr.st finAct w in act w
+finalize : FiberImpl e es a -> Outcome es a -> IO1 ()
+finalize fbr o t =
+  let act # t := casupdate1 fbr.st finAct t
+   in act t
 
   where
-    finAct : FiberST es a -> (FiberST es a, PrimIO ())
+    finAct : FiberST es a -> (FiberST es a, IO1 ())
     finAct s = ({state := Done o, cbs := []} s, runCBs s.cbs o)
 
 -- Cancel the given fiber, resuming its computation if it has
 -- been suspended.
-doCancel : FiberImpl e es a -> PrimIO ()
-doCancel fbr w = let MkIORes act w := modify fbr.st cancelAct w in act w
+doCancel : FiberImpl e es a -> IO1 ()
+doCancel fbr t =
+  let act # t := casupdate1 fbr.st cancelAct t
+   in act t
 
   where
-    cancelAct : FiberST es a -> (FiberST es a, PrimIO ())
+    cancelAct : FiberST es a -> (FiberST es a, IO1 ())
     cancelAct s =
       case s.state of
-        Done _        => (s,primDummy)
+        Done _        => (s,dummy)
         Suspended act => ({canceled := True, state := Running} s, act)
-        _             => ({canceled := True} s, primDummy)
+        _             => ({canceled := True} s, dummy)
 
 -- Suspend the fiber because it is waiting for the result of
 -- an asynchronous computation. If the asynchronous computation
 -- was faster, the fiber's state will be at `HasResult` and
 -- it will immediately be resumed.
-suspend : FiberImpl e es a -> PrimIO () -> PrimIO ()
-suspend fbr cont w = let MkIORes act w := modify fbr.st suspendAct w in act w
+suspend : FiberImpl e es a -> IO1 () -> IO1 ()
+suspend fbr cont t =
+  let act # t := casupdate1 fbr.st suspendAct t
+   in act t
 
   where
-    suspendAct : FiberST es a -> (FiberST es a, PrimIO ())
+    suspendAct : FiberST es a -> (FiberST es a, IO1 ())
     suspendAct s =
       case s.state of
         HasResult => ({state := Running} s, cont) 
-        _         => ({state := Suspended cont} s, primDummy) 
+        _         => ({state := Suspended cont} s, dummy) 
 
 -- Resumes the computation of this fiber because the result from
 -- an asynchronous computation is ready. If this is invoked while
@@ -293,17 +288,19 @@ suspend fbr cont w = let MkIORes act w := modify fbr.st suspendAct w in act w
 --
 -- If the fiber is already `Done`, well then we are much too late
 -- and should abort silently.
-resume : FiberImpl e es a -> PrimIO ()
-resume fbr w = let MkIORes act w := modify fbr.st resumeAct w in act w
+resume : FiberImpl e es a -> IO1 ()
+resume fbr t =
+  let act # t := casupdate1 fbr.st resumeAct t
+   in act t
 
   where
-    resumeAct : FiberST es a -> (FiberST es a, PrimIO ())
+    resumeAct : FiberST es a -> (FiberST es a, IO1 ())
     resumeAct s =
       case s.state of
         Suspended c => ({state := Running} s, c)
-        Running     => ({state := HasResult} s, primDummy) 
-        HasResult   => (s, primDummy)
-        Done _      => (s, primDummy)
+        Running     => ({state := HasResult} s, dummy) 
+        HasResult   => (s, dummy)
+        Done _      => (s, dummy)
 
 export
 toFiber : FiberImpl e es a -> Fiber es a
@@ -347,7 +344,7 @@ parameters {auto tg : TokenGen}
     -> (cedeCount   : Nat)
     -> FiberImpl e fs b
     -> Stack e es fs a b
-    -> PrimIO ()
+    -> IO1 ()
 
   covering
   runC :
@@ -356,7 +353,7 @@ parameters {auto tg : TokenGen}
     -> (cedeCount : Nat)
     -> FiberImpl e fs b
     -> Stack e es fs a b
-    -> PrimIO ()
+    -> IO1 ()
 
   covering
   runR :
@@ -366,92 +363,91 @@ parameters {auto tg : TokenGen}
     -> (cedeCount   : Nat)
     -> FiberImpl e fs b
     -> Stack e es fs a b
-    -> PrimIO ()
+    -> IO1 ()
 
   covering
-  spawnFib : EventLoop e -> FiberImpl e es a -> Async e es a -> PrimIO ()
+  spawnFib : EventLoop e -> FiberImpl e es a -> Async e es a -> IO1 ()
   spawnFib el f act = el.spawn (Pkg f.env (run el act 0 limit f []))
 
-  run el act cm 0     fbr st w = cedeFbr el fbr (run el act cm limit fbr st) w
-  run el act 0  (S k) fbr st w =
-    let MkIORes s w := readRef fbr.st w
+  run el act cm 0     fbr st t = cedeFbr el fbr (run el act cm limit fbr st) t
+  run el act 0  (S k) fbr st t =
+    let s # t := read1 fbr.st t
      in case s.canceled of
-          False => runR el act 0 k fbr st w
-          True  => runC el act k fbr st w
-  run el act c  (S k) fbr st w = runR el act c k fbr st w
+          False => runR el act 0 k fbr st t
+          True  => runC el act k fbr st t
+  run el act c  (S k) fbr st t = runR el act c k fbr st t
 
-  runC el act cc fbr st w =
+  runC el act cc fbr st t =
     case act of
-      UC f   => run el (f fbr.token 1) 1 cc fbr st w
+      UC f   => run el (f fbr.token 1) 1 cc fbr st t
       Term x => case st of
-        Bnd f :: t  => case f x of
-          UC g => run el (g fbr.token 1) 1 cc fbr t w
-          a    => run el (pure ()) 1 cc fbr (hooks st) w
-        Inc :: t    => run el (Term x) 1 cc fbr t w
-        _           => run el (pure ()) 1 cc fbr (hooks st) w
-      _    => run el (pure ()) 1 cc fbr (hooks st) w
+        Bnd f :: tl  => case f x of
+          UC g => run el (g fbr.token 1) 1 cc fbr tl t
+          a    => run el (pure ()) 1 cc fbr (hooks st) t
+        Inc :: tl    => run el (Term x) 1 cc fbr tl t
+        _           => run el (pure ()) 1 cc fbr (hooks st) t
+      _    => run el (pure ()) 1 cc fbr (hooks st) t
 
-  runR el act cm cc fbr st w =
+  runR el act cm cc fbr st t =
     case act of
       Bind x f => case x of
-        Term x => run el (f x) cm cc fbr st w
-        _      => run el x cm cc fbr (Bnd f :: st) w
+        Term x => run el (f x) cm cc fbr st t
+        _      => run el x cm cc fbr (Bnd f :: st) t
 
       Term x      => case st of
-        Bnd f  :: t => run el (f x) cm        cc fbr t w
-        Inc    :: t => run el act   (S cm)    cc fbr t w
-        Dec    :: t => run el act   (pred cm) cc fbr t w
+        Bnd f  :: tl => run el (f x) cm        cc fbr tl t
+        Inc    :: tl => run el act   (S cm)    cc fbr tl t
+        Dec    :: tl => run el act   (pred cm) cc fbr tl t
         -- ignore cancel hook because cancelation is currently not
         -- observable.
-        Hook h :: t => run el act   cm        cc fbr t w
-        Abort  :: t => finalize fbr Canceled w
-        []          => finalize fbr (toOutcome x) w
+        Hook h :: tl => run el act   cm        cc fbr tl t
+        Abort  :: tl => finalize fbr Canceled t
+        []          => finalize fbr (toOutcome x) t
 
       Sync x      =>
-        let MkIORes r w := toPrim x w
-         in run el (Term r) cm cc fbr st w
+        let r # t := ioToF1 x t
+         in run el (Term r) cm cc fbr st t
 
       Cancel      => 
-        let MkIORes _ w := doCancel fbr w
-         in run el (pure ()) cm cc fbr st w
+        let _ # t := doCancel fbr t
+         in run el (pure ()) cm cc fbr st t
 
-      OnCncl x y  => run el x cm cc fbr (Hook y :: st) w
+      OnCncl x y  => run el x cm cc fbr (Hook y :: st) t
 
-      UC f        => run el (f fbr.token (S cm)) (S cm) cc fbr (Dec::st) w
+      UC f        => run el (f fbr.token (S cm)) (S cm) cc fbr (Dec::st) t
 
       Env         =>
-        let MkIORes ev w := readRef fbr.env w
-         in run el (pure ev) cm cc fbr st w
+        let ev # t := read1 fbr.env t
+         in run el (pure ev) cm cc fbr st t
 
-      Cede        => cedeFbr el fbr (run el (pure ()) cm cc fbr st) w
+      Cede        => cedeFbr el fbr (run el (pure ()) cm cc fbr st) t
 
       Start x     =>
-        let MkIORes fbr2 w := newFiber el w
-            MkIORes _    w := spawnFib el fbr2 x w
-         in run el (pure $ toFiber fbr2) cm cc fbr st w
+        let fbr2 # t := newFiber el t
+            _    # t := spawnFib el fbr2 x t
+         in run el (pure $ toFiber fbr2) cm cc fbr st t
 
       Asnc f =>
-        let MkIORes res  w := newRef Nothing w
-            MkIORes cncl w := f (\r,w => let MkIORes _ w := put res r w in resume fbr w) w
-         in run el (onCancel (Wait res) (primIO cncl)) cm cc fbr st w
+        let res  # t := refIO Nothing t
+            cncl # t := f (\r,t => let _ # t := put res r t in resume fbr t) t
+         in run el (onCancel (Wait res) (runIO cncl)) cm cc fbr st t
 
-      APoll t k x => case t == fbr.token && k == cm of
-        True  => run el x (pred cm) cc fbr (Inc :: st) w
-        False => run el x cm        cc fbr st w
+      APoll tok k x => case tok == fbr.token && k == cm of
+        True  => run el x (pred cm) cc fbr (Inc :: st) t
+        False => run el x cm        cc fbr st t
 
       Wait res     =>
-        let MkIORes mv w := readRef res w
-         in case mv of
-              Just v  => run el (Term v) cm cc fbr st w
-              Nothing => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) w
+        case read1 res t of
+          Just v  # t => run el (Term v) cm cc fbr st t
+          Nothing # t => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) t
 
   export covering
   runAsyncWith : EventLoop e -> Async e es a -> (Outcome es a -> IO ()) -> IO ()
-  runAsyncWith el act cb = fromPrim $ \w =>
-    let MkIORes fbr w := newFiber el w
-        MkIORes _   w := observe fbr (\o => toPrim $ cb o) w
-     in spawnFib el fbr act w
-
+  runAsyncWith el act cb = runIO $ \t =>
+    let fbr # t := newFiber el t
+        _   # t := observe fbr (\o => ioToF1 $ cb o) t
+     in spawnFib el fbr act t
+  
   export covering %inline
   runAsync : EventLoop e -> Async e es a -> IO ()
   runAsync el as = runAsyncWith el as (\_ => pure ())

@@ -1,9 +1,13 @@
 ||| Utilities for working with work loops.
 module IO.Async.Loop
 
-import IO.Async.Internal.Ref
+import public Data.Linear.Ref1
 
 %default total
+
+public export
+0 IO1 : Type -> Type
+IO1 = F1 [World]
 
 ||| Initial work package sent to an event loop.
 |||
@@ -14,8 +18,8 @@ import IO.Async.Internal.Ref
 public export
 record Package (e : Type) where
   constructor Pkg
-  env : Ref e
-  act : PrimIO ()
+  env : IORef e
+  act : IO1 ()
 
 ||| A context for submitting and running work packages asynchronously.
 |||
@@ -33,6 +37,6 @@ record Package (e : Type) where
 public export
 record EventLoop (e : Type) where
   constructor EL
-  spawn : Package e -> PrimIO ()
-  cede  : e -> PrimIO () -> PrimIO ()
+  spawn : Package e -> IO1 ()
+  cede  : Package e -> IO1 ()
   init  : e

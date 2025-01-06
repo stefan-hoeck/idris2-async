@@ -18,82 +18,76 @@ import System
 public export
 data Work : Type where
   Done : Work
-  W    : PrimIO () -> Work
+  W    : IO1 () -> Work
 
 ||| An empty work
 export
-primDummy : PrimIO ()
-primDummy = \w => MkIORes () w
+dummy : IO1 ()
+dummy = \t => () # t
 
-||| `PrimIO` version of `die`
+||| `IO1` version of `die`
 export %inline
-primDie : String -> PrimIO ()
-primDie s = toPrim $ die s
-
-export %inline
-primWhen : Bool -> PrimIO () -> PrimIO ()
-primWhen True  f = f
-primWhen False _ = MkIORes ()
+die : String -> IO1 ()
+die s = ioToF1 $ die s
 
 ||| An empty work package.
 export %inline
-noWork : PrimIO Work
-noWork = MkIORes (W primDummy)
+noWork : IO1 Work
+noWork t = W dummy # t
 
 ||| The `Done` work package.
 export %inline
-done : PrimIO Work
-done = MkIORes Done
+done : IO1 Work
+done t = Done # t
 
-||| Wraps a work package in a `PrimIO Work`.
+||| Wraps a work package in a `IO1 Work`.
 export %inline
-work : PrimIO () -> PrimIO Work
-work w = MkIORes (W w)
+work : IO1 () -> IO1 Work
+work w t = W w # t
 
-||| This will wait on the give condition and return with `noWork`
-||| once it awakes. The calling loop will then be responsible to ask
-||| for more work.
-export %inline
-waitNoWork : Condition -> Mutex -> PrimIO Work
-waitNoWork c m w = let MkIORes _ w := conditionWait c m w in noWork w
+-- ||| This will wait on the give condition and return with `noWork`
+-- ||| once it awakes. The calling loop will then be responsible to ask
+-- ||| for more work.
+-- export %inline
+-- waitNoWork : Condition -> Mutex -> IO1 Work
+-- waitNoWork c m w = let MkIORes _ w := conditionWait c m w in noWork w
+-- 
+-- ||| This will wait on the give condition with a timeout
+-- ||| and return with `noWork` once it awakes. The calling loop
+-- ||| will then be responsible to ask for more work.
+-- export %inline
+-- sleepNoWork : Condition -> Mutex -> Integer -> IO1 Work
+-- sleepNoWork c m us w =
+--   let MkIORes _ w := conditionWaitTimeout c m us w
+--    in noWork w
 
-||| This will wait on the give condition with a timeout
-||| and return with `noWork` once it awakes. The calling loop
-||| will then be responsible to ask for more work.
-export %inline
-sleepNoWork : Condition -> Mutex -> Integer -> PrimIO Work
-sleepNoWork c m us w =
-  let MkIORes _ w := conditionWaitTimeout c m us w
-   in noWork w
-
-||| Tail-recursively runs a list of `PrimIO` actions
+||| Tail-recursively runs a list of `IO1` actions
 export
-runAll : (a -> PrimIO ()) -> List a -> PrimIO ()
-runAll f []        w = MkIORes () w
-runAll f (x :: xs) w = let MkIORes _ w := f x w in runAll f xs w
+runAll : (a -> IO1 ()) -> List a -> IO1 ()
+runAll f []        t = () # t
+runAll f (x :: xs) t = let _ # t := f x t in runAll f xs t
 
 ||| Keep only those values in a list that have not yet been canceled.
 export
-nonCanceled : (a -> Ref Bool) -> List a -> PrimIO (List a)
+nonCanceled : (a -> IORef Bool) -> List a -> IO1 (List a)
 nonCanceled f = go [<]
 
   where
-    go : SnocList a -> List a -> PrimIO (List a)
-    go sx []        w = MkIORes (sx <>> []) w
-    go sx (x :: xs) w =
-      let MkIORes b w := readRef (f x) w
-       in case b of
-            True  => go sx xs w
-            False => go (sx :< x) xs w
+    go : SnocList a -> List a -> IO1 (List a)
+    go sx []        t = (sx <>> []) # t
+    go sx (x :: xs) t =
+      case read1 (f x) t of
+        True  # t => go sx xs t
+        False # t => go (sx :< x) xs t
 
 ||| Sleeps for the given duration (rounded down to micro seconds)
 export
-doSleep : Clock Duration -> PrimIO ()
-doSleep c w =
+doSleep : Clock Duration -> IO1 ()
+doSleep c t =
   let v := cast {to = Int} (toNano c `div` 1000)
    in case choose (v >= 0) of
-        Left x  => toPrim (usleep v) w
-        Right x => MkIORes () w
+        Left x  => ioToF1 (usleep v) t
+        Right x => () # t
 
 ||| Boolean-like flag indicating if a loop is still alive or should
 ||| stop.
