@@ -15,7 +15,6 @@ import IO.Async.Internal.Token
 
 import public IO.Async
 import public IO.Async.Loop
-import public IO.Async.Loop.Poller
 import public IO.Async.Loop.SignalH
 import public IO.Async.Loop.TimerH
 
