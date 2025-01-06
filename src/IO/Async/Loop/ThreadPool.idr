@@ -123,10 +123,16 @@ cede p t =
            in loop st pkg t
 
 workSTs :
-     IOArray n (Queue $ Package WorkST)
+     {n : _}
+  -> IOArray n (Queue $ Package WorkST)
   -> (k : Nat)
   -> {auto 0 lte : LTE k n}
   -> IO (Vect k WorkST)
+workSTs qs 0     = pure []
+workSTs qs (S k) = do
+  w  <- workST (natToFinLT k) qs
+  ws <- workSTs qs k
+  pure (w::ws)
 
 ||| Create a new thread pool of `n` worker threads and additional thread
 ||| for scheduling timed tasks.

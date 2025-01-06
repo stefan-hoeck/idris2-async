@@ -384,24 +384,29 @@ export
 lazy : Lazy a -> Async e es a
 lazy v = primAsync_ $ \cb => cb (Right v)
 
-||| Delay a computation by the given number of nanoseconds.
-export
-waitTill : TimerH e => Clock Monotonic -> Async e es ()
-waitTill cl = do
-  ev <- env
-  primAsync $ \cb => primWaitTill ev cl (cb $ Right ())
+parameters {auto has : Has Errno es}
+           {auto tim : TimerH e}
 
-||| Delay a computation by the given number of nanoseconds.
-export
-sleep : TimerH e => (dur : Clock Duration) -> Async e es ()
-sleep dur = do
-  now <- liftIO (clockTime Monotonic)
-  waitTill (addDuration now dur)
+  ||| Delay a computation by the given number of nanoseconds.
+  export
+  waitTill : Clock Monotonic -> Async e es ()
+  waitTill cl = do
+    ev <- env
+    primAsync $ \cb => primWaitTill ev cl $ \case
+      Right _ => cb (Right ())
+      Left  x => cb (Left $ inject x)
 
-||| Delay a computation by the given number of nanoseconds.
-export
-delay : TimerH e => (dur : Clock Duration) -> Async e es a -> Async e es a
-delay dur act = sleep dur >> act
+  ||| Delay a computation by the given number of nanoseconds.
+  export
+  sleep : (dur : Clock Duration) -> Async e es ()
+  sleep dur = do
+    now <- liftIO (clockTime Monotonic)
+    waitTill (addDuration now dur)
+
+  ||| Delay a computation by the given number of nanoseconds.
+  export
+  delay : (dur : Clock Duration) -> Async e es a -> Async e es a
+  delay dur act = sleep dur >> act
 
 ||| Converts a number of microseconds to nanoseconds
 export

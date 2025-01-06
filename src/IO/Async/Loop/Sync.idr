@@ -16,13 +16,13 @@ import System.Clock
 record Timed where
   constructor T
   canceled : IORef Bool
-  act      : IO1 ()
+  act      : Either Errno () -> IO1 ()
 
 -- run a timer if it has not been canceled yet
 runTimer : Timed -> IO1 ()
 runTimer tm t =
   let False # t := read1 tm.canceled t | _ # t => () # t
-   in tm.act t
+   in tm.act (Right ()) t
 
 --------------------------------------------------------------------------------
 -- Loop State
@@ -41,7 +41,7 @@ TimerH SyncST where
   primWaitTill s c act t =
     let ref # t := refIO False t
         _   # t := mod1 s.timers (insertWith (++) c [T ref act]) t
-     in (write1 ref True) # t
+     in write1 ref True # t
 
 --------------------------------------------------------------------------------
 -- Loop Implementation
