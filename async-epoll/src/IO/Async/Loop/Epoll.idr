@@ -248,16 +248,13 @@ export
 record ThreadPool where
   constructor TP
   size    : Nat
-  ids     : Vect (S size) ThreadID
+  ids     : Vect size ThreadID
   workers : Vect (S size) EpollST
 
 ||| Sets the `stopped` flag of all worker threads and awaits
 ||| their termination.
 stop : ThreadPool -> IO ()
-stop tp = do
-  runIO $ traverse1_ (\w => write1 w.alive Stop) tp.workers
-  traverse_ (\x => threadWait x) tp.ids
-  traverse_ release tp.workers
+stop tp = runIO $ traverse1_ (\w => write1 w.alive Stop) tp.workers
 
 ||| Submit a new `IO` action to be processed by the worker threads
 ||| in a thread pool.
@@ -289,20 +286,19 @@ workSTs maxFiles qs (S k) = do
   ws <- workSTs maxFiles qs k
   pure (w::ws)
 
-||| Create a new thread pool of `n` worker threads and additional thread
-||| for scheduling timed tasks.
+||| Create a new thread pool of `n` worker threads and additional
 covering
 mkThreadPool :
      (n : Nat)
   -> {auto 0 p : IsSucc n}
-  -> IO (EventLoop EpollST, IO ())
+  -> IO (ThreadPool, EventLoop EpollST)
 mkThreadPool (S k) = do
   qs <- newIOArray (S k) (Queue.empty {a = Package EpollST})
   let mfs := sysconf SC_OPEN_MAX
   ws <- workSTs (cast mfs) qs (S k)
-  ts <- traverse (\x => fork (runIO $ steal x x.me x.size)) ws
+  ts <- traverse (\x => fork (runIO $ steal x x.me x.size)) (tail ws)
   let tp := TP k ts ws
-  pure (EL submit cede (head ws), stop tp)
+  pure (tp, EL submit cede (head ws))
 
 export covering
 app :
@@ -313,12 +309,11 @@ app :
   -> IO ()
 app n sigs act = do
   sigprocmask SIG_BLOCK sigs
-  (el,close) <- mkThreadPool n
-  m  <- primIO mkMutex
-  c  <- primIO makeCondition
+  (tp,el) <- mkThreadPool n
   tg <- newTokenGen
-  runAsyncWith 1024 el act (\_ => putStrLn "Done. Shutting down" >> fromPrim (conditionBroadcast c))
-  primIO $ acqMutex m
-  primIO $ conditionWait c m
-  close
+  runAsyncWith 1024 el act (\_ => putStrLn "Done. Shutting down" >> stop tp)
+  let wst := head tp.workers
+  runIO $ steal wst wst.me wst.size
+  traverse_ (\x => threadWait x) tp.ids
+  traverse_ release tp.workers
   usleep 100
