@@ -61,7 +61,6 @@ record EpollST where
   maxFiles : Nat
   handles  : IOArray maxFiles FileHandle
   events   : CArrayIO maxFiles SEpollEvent
-  signals  : CArrayIO 1 SSiginfo
   epoll    : Epollfd
 
 public export
@@ -93,14 +92,12 @@ workST me maxFiles queues =
         alive   # t := refIO Run t
         handles # t := arrayIO maxFiles hdummy t
         events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
-        signals # t := ioToF1 (malloc SSiginfo 1) t
         epoll   # t := dieOnErr (epollCreate 0) t
-     in W n me alive empty queues maxFiles handles events signals epoll # t
+     in W n me alive empty queues maxFiles handles events epoll # t
 
 release : EpollST -> IO ()
 release s = do
   free s.events
-  free s.signals
   fromPrim (close' s.epoll)
 
 next : {n : _} -> Fin n -> Fin n
@@ -220,7 +217,7 @@ hsignal : EpollST -> Signalfd -> (Either Errno Siginfo -> IO1 ()) -> FileHandle
 hsignal s fd act ev t = 
   case isEPOLLIN ev of
     False => let _ # t := toF1 (close' fd) t in act (Left EINVAL) t
-    True  => case readSignalfd fd s.signals t of
+    True  => case readSignalfd fd 1 t of
       E x t =>
         let _ # t := toF1 (close' fd) t
          in act (Left x) t
