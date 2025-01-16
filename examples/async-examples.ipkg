@@ -1,0 +1,13 @@
+package async-examples
+version = 0.1.0
+authors = "stefan-hoeck"
+
+depends = async-epoll
+        , quantifiers-extra
+        , getopts
+
+sourcedir = "src"
+
+main = Main
+
+executable = "async-examples"
