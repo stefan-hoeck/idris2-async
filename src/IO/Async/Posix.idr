@@ -32,6 +32,10 @@ export %inline
 Resource Dir where
   cleanup d = dropErrs {es = [Errno]} (closedir d)
 
+export %inline
+Resource CPtr where
+  cleanup = freePtr
+
 namespace Fd
   export %inline
   Cast a Fd => Resource a where
