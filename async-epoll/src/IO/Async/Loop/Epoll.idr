@@ -15,8 +15,9 @@ import IO.Async.Internal.Token
 
 import public IO.Async
 import public IO.Async.Loop
-import public IO.Async.Loop.SignalH
+import public IO.Async.Epoll
 import public IO.Async.Loop.TimerH
+import public IO.Async.Loop.SignalH
 
 import System
 import System.Linux.Epoll.Prim
@@ -107,6 +108,16 @@ next (FS x) = weaken x
 covering
 steal : (s : EpollST) -> Fin s.size -> Nat -> IO1 ()
 
+logTimeout : Int32 -> IO1 ()
+logTimeout 0 t = () # t
+logTimeout n t = toF1 (stdoutLn "sleeping for \{show n} ms") t
+
+logEvs : List EpollEvent -> IO1 ()
+logEvs es t =
+  case length es < 2 of
+    True => () # t
+    False => toF1 (stdoutLn "got \{show $ length es} epoll events") t
+
 covering
 poll : (s : EpollST) -> Int32 -> IO1 ()
 poll s timeout t =
@@ -121,13 +132,18 @@ poll s timeout t =
           _ # t := h ev t
        in  go es t
 
+covering %inline
+cont : EpollST -> Package EpollST -> IO1 ()
+cont s pkg t =
+  let _ # t := write1 pkg.env s t
+      _ # t := pkg.act t
+   in poll s 0 t
+
 covering
 loop : EpollST -> Package EpollST -> IO1 ()
 loop s pkg t =
   let Run # t := read1 s.alive t | _ # t => () # t
-      _   # t := write1 pkg.env s t
-      _   # t := pkg.act t
-      _   # t := poll s 0 t
+      _   # t := cont s pkg t
    in steal s s.me s.size t
 
 steal s x 0     t =
@@ -147,93 +163,39 @@ steal s x (S k) t =
 ctl  : EpollST -> EpollOp -> Fd -> Event -> EPrim ()
 ctl s op fd ev = epollCtl s.epoll op fd ev
 
-%inline
-removeHandle : EpollST -> Fd -> IO1 ()
-removeHandle s b t =
-  case ctl s Del b 0 t of
-    R _ t => () # t
-    E _ t => () # t
+closeIf : Fd -> Bool -> IO1 ()
+closeIf fd True  t = toF1 (close' fd) t
+closeIf fd False t = () # t
+
+removeHandle : EpollST -> Fd -> Bool -> IO1 ()
+removeHandle s fd autoClose t =
+  case ctl s Del fd 0 t of
+    R _ t => closeIf fd autoClose t
+    E _ t => closeIf fd autoClose t
 
 pollFile :
-     {auto fd : FileDesc a}
-  -> EpollST
-  -> (file : a)
+     EpollST
+  -> Fd
   -> Event
-  -> FileHandle
-  -> EPrim (IO1 ())
-pollFile s file ev fh t =
-  let fd      := cast {to = Fd} file
-      _ # t := setHandle s fd fh t
-      R _ t := ctl s Add fd ev t | E x t => E x t
-   in R (removeHandle s fd) t
-
-andClose : FileDesc a => a -> IO1 () -> IO1 ()
-andClose fd act t =
-  let _ # t := act t
-   in toF1 (close' fd) t
-
-isEPOLLIN : Event -> Bool
-isEPOLLIN ev = (ev.event .&. event EPOLLIN) == event EPOLLIN
-
-htimer : Timerfd -> (Either Errno () -> IO1 ()) -> FileHandle
-htimer fd act ev t = 
-  case isEPOLLIN ev of
-    True  => let _ # t := toF1 (close' fd) t in act (Right ()) t
-    False => let _ # t := toF1 (close' fd) t in act (Left EINVAL) t
-
-%inline
-fail : (Either Errno a -> IO1 ()) -> Errno -> IO1 (IO1 ())
-fail act x t = let _ # t := act (Left x) t in dummy # t
-
-%inline
-failClose :
-     {auto fd : FileDesc b}
-  -> b
-  -> (Either Errno a -> IO1 ())
-  -> Errno -> IO1 (IO1 ())
-failClose vb act x t =
-  let _ # t := toF1 (close' vb) t
-      _ # t := act (Left x) t
-   in dummy # t
-
-%inline
-succ : (Either Errno a -> IO1 ()) -> a -> IO1 (IO1 ())
-succ act x t = let _ # t := act (Right x) t in dummy # t
-
-export
-TimerH EpollST where
-  primWaitTill s cl f t =
-    let now # t := ioToF1 (clockTime Monotonic) t
-     in case now >= cl of
-          True  => succ f () t
+  -> (autoClose : Bool)
+  -> (Either Errno Event -> IO1 ())
+  -> IO1 (Bool -> IO1 ())
+pollFile s file ev ac fh t =
+  let fd    := cast {to = Fd} file
+      _ # t := setHandle s fd (fh . Right) t
+   in case ctl s Add fd ev t of
+        R _ t => const (removeHandle s fd ac) # t
+        E x t => case x == EPERM of
+          True =>
+            let _ # t := fh (Right ev) t
+             in const (closeIf fd ac) # t
           False =>
-            let ts     := TS (duration 0 0) (timeDifference cl now)
-                R fd t := timerfd CLOCK_MONOTONIC 0 t | E x t => fail f x t
-                R _  t := setTime fd 0 ts t | E x t => failClose fd f x t
-                R cl t := pollFile s fd EPOLLIN (htimer fd f) t | E x t => failClose fd f x t
-             in andClose fd cl # t
+            let _ # t := fh (Left x) t
+             in const (closeIf fd ac) # t
 
-hsignal : EpollST -> Signalfd -> (Either Errno Siginfo -> IO1 ()) -> FileHandle
-hsignal s fd act ev t = 
-  case isEPOLLIN ev of
-    False => let _ # t := toF1 (close' fd) t in act (Left EINVAL) t
-    True  => case readSignalfd fd 1 t of
-      E x t =>
-        let _ # t := toF1 (close' fd) t
-         in act (Left x) t
-      R [si] t =>
-        let _ # t := toF1 (close' fd) t
-         in act (Right si) t
-      R _ t =>
-        let _ # t := toF1 (close' fd) t
-         in act (Left EINVAL) t
-
-export
-SignalH EpollST where
-  primOnSignals s sigs f t =
-    let R fd t := signalfd sigs 0 t | E x t => fail f x t
-        R cl t := pollFile s fd EPOLLIN (hsignal s fd f) t | E x t => failClose fd f x t
-     in andClose fd cl # t
+export %inline
+Epoll EpollST where
+  primEpoll = pollFile
 
 --------------------------------------------------------------------------------
 -- ThreadPool
@@ -268,10 +230,10 @@ cede : Package EpollST -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
    in case deqAt st.queues st.me t of
-        Nothing  # t => loop st p t
+        Nothing  # t => cont st p t
         Just pkg # t =>
           let _ # t := enqAt st.queues st.me p t
-           in loop st pkg t
+           in cont st pkg t
 
 workSTs :
      {n : _}

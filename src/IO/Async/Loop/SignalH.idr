@@ -12,4 +12,4 @@ interface SignalH a where
        a
     -> List Signal
     -> (Either Errno Siginfo -> IO1 ())
-    -> IO1 (IO1 ())
+    -> IO1 (Bool -> IO1 ())
