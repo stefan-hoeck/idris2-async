@@ -180,7 +180,7 @@ Epoll e => TimerH e where
             let ts     := TS (duration 0 0) (timeDifference cl now)
                 R fd t := timerfd CLOCK_MONOTONIC 0 t | E x t => fail f x t
                 R _  t := setTime fd 0 ts t | E x t => failClose fd f x t
-             in primEpoll s (cast fd) EPOLLIN True (htimer fd f) t
+             in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (htimer fd f) t
 
 hsig : Signalfd -> (Either Errno Siginfo -> IO1 ()) -> Either Errno Event -> IO1 ()
 hsig fd act (Left x)   t = act (Left x) t
@@ -196,4 +196,4 @@ export
 Epoll e => SignalH e where
   primOnSignals s sigs f t =
     let R fd t := signalfd sigs 0 t | E x t => fail f x t
-     in primEpoll s (cast fd) EPOLLIN True (hsig fd f) t
+     in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (hsig fd f) t

@@ -121,9 +121,7 @@ logEvs es t =
 covering
 poll : (s : EpollST) -> Int32 -> IO1 ()
 poll s timeout t =
-  let _  # t := logTimeout timeout t
-      vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
-      _  # t := logEvs vs t
+  let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
    in go vs t
 
   where

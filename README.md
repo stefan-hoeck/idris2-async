@@ -287,13 +287,13 @@ an event to occur. As such, we want to be able to run *a lot* such
 computations in parallel:
 
 ```idris
+logFiber : Integer -> Async e [Errno] ()
+logFiber n = when ((n `mod` 100) == 0) (stdoutLn "fiber \{show n} done")
+
 sleepMany : TimerH e => Nat -> Async e [Errno] ()
 sleepMany 0     = pure ()
 sleepMany (S k) =
-  ignore $
-    parTraverse
-      (\n => stdoutLn "preparing fiber \{show n}" >> sleep 10000.ms >> stdoutLn "fiber \{show n} done")
-      [0 .. k]
+  ignore $ parTraverse (\n => sleep 100.ms >> logFiber n) [0 .. cast k]
 ```
 
 You can try this by running the application like so:
