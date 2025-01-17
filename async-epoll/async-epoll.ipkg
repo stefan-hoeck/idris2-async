@@ -6,6 +6,7 @@ brief   = "An epoll-based event loop for asynchronous computations on Linux"
 depends = async
         , linux
 
-modules = IO.Async.Loop.Epoll
+modules = IO.Async.Epoll
+        , IO.Async.Loop.Epoll
 
 sourcedir = "src"

@@ -12,4 +12,4 @@ interface TimerH a where
        a
     -> Clock Monotonic
     -> (Either Errno () -> IO1 ())
-    -> IO1 (IO1 ())
+    -> IO1 (Bool -> IO1 ())

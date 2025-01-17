@@ -181,7 +181,7 @@ racePair x y = do
     flip onCancel (cancel f1 >> cancel f2) $ primAsync $ \cb,t =>
       let c1 # t := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) t
           c2 # t := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) t
-       in (\x => let _ # x := c1 x in c2 x) # t
+       in (\b,t => let _ # t := c1 b t in c2 b t) # t
 
 ||| Awaits the completion of the bound fiber and returns its result once it completes.
 ||| 
@@ -373,7 +373,7 @@ primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
 primAsync_ f =
   primAsync $ \cb,t =>
     let _ # t := f cb t
-     in dummy # t
+     in const dummy # t
 
 --------------------------------------------------------------------------------
 -- Sleeping and Timed Execution
