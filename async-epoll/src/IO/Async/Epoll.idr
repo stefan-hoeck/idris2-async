@@ -29,14 +29,24 @@ parameters {auto has : Has Errno es}
            {auto fd  : FileDesc f}
            (fd       : f)
 
+  ||| Polls the file descriptor for the given events without blocking
+  ||| an operating system thread.
+  |||
+  ||| If the file descriptor does not support polling, for instance,
+  ||| because it is a regular file, this will immediately return
+  ||| `ev`.
   export
-  epoll : Event -> Async e es Event
+  epoll : (ev : Event) -> Async e es Event
   epoll ev = do
     st <- env
     primAsync $ \cb => primEpoll st (cast fd) ev False $ \case
       Right x => cb (Right x)
       Left  x => cb (Left $ inject x)
 
+  ||| Runs a computation after polling a file descriptor.
+  |||
+  ||| This allows us to read from or write to a file descriptor
+  ||| without blocking an operating system thread.
   export
   onEvent : Event -> Async e es a -> Async e es a
   onEvent ev act = do

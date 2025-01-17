@@ -108,10 +108,22 @@ next (FS x) = weaken x
 covering
 steal : (s : EpollST) -> Fin s.size -> Nat -> IO1 ()
 
+logTimeout : Int32 -> IO1 ()
+logTimeout 0 t = () # t
+logTimeout n t = toF1 (stdoutLn "sleeping for \{show n} ms") t
+
+logEvs : List EpollEvent -> IO1 ()
+logEvs es t =
+  case length es < 2 of
+    True => () # t
+    False => toF1 (stdoutLn "got \{show $ length es} epoll events") t
+
 covering
 poll : (s : EpollST) -> Int32 -> IO1 ()
 poll s timeout t =
-  let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
+  let _  # t := logTimeout timeout t
+      vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
+      _  # t := logEvs vs t
    in go vs t
 
   where
@@ -122,13 +134,18 @@ poll s timeout t =
           _ # t := h ev t
        in  go es t
 
+covering %inline
+cont : EpollST -> Package EpollST -> IO1 ()
+cont s pkg t =
+  let _ # t := write1 pkg.env s t
+      _ # t := pkg.act t
+   in poll s 0 t
+
 covering
 loop : EpollST -> Package EpollST -> IO1 ()
 loop s pkg t =
   let Run # t := read1 s.alive t | _ # t => () # t
-      _   # t := write1 pkg.env s t
-      _   # t := pkg.act t
-      _   # t := poll s 0 t
+      _   # t := cont s pkg t
    in steal s s.me s.size t
 
 steal s x 0     t =
@@ -170,9 +187,13 @@ pollFile s file ev ac fh t =
       _ # t := setHandle s fd (fh . Right) t
    in case ctl s Add fd ev t of
         R _ t => const (removeHandle s fd ac) # t
-        E x t =>
-          let _ # t := fh (Left x) t
-           in const (closeIf fd ac) # t
+        E x t => case x == EPERM of
+          True =>
+            let _ # t := fh (Right ev) t
+             in const (closeIf fd ac) # t
+          False =>
+            let _ # t := fh (Left x) t
+             in const (closeIf fd ac) # t
 
 export %inline
 Epoll EpollST where
@@ -211,10 +232,10 @@ cede : Package EpollST -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
    in case deqAt st.queues st.me t of
-        Nothing  # t => loop st p t
+        Nothing  # t => cont st p t
         Just pkg # t =>
           let _ # t := enqAt st.queues st.me p t
-           in loop st pkg t
+           in cont st pkg t
 
 workSTs :
      {n : _}

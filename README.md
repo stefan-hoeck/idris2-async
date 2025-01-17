@@ -292,7 +292,7 @@ sleepMany 0     = pure ()
 sleepMany (S k) =
   ignore $
     parTraverse
-      (\n => sleep 100.ms >> stdoutLn "fiber \{show n} done")
+      (\n => stdoutLn "preparing fiber \{show n}" >> sleep 10000.ms >> stdoutLn "fiber \{show n} done")
       [0 .. k]
 ```
 

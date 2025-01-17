@@ -6,18 +6,10 @@ import System
 import System.GetOpts
 import System.Posix.Signal
 
-import public Data.C.Ptr
-import public IO.Async
-import public IO.Async.File
-import public IO.Async.Loop.Epoll
-import public IO.Async.Posix
+import public Util
 
 %default total
 %language ElabReflection
-
-public export
-0 Prog : List Type -> Type -> Type
-Prog = Async EpollST
 
 --------------------------------------------------------------------------------
 -- Reading command-line options and arguments
