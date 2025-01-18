@@ -1,6 +1,8 @@
 module Main
 
 import Example.CH4.Copy
+import Example.CH4.CopyWithHoles
+import Example.CH4.Seek
 import Opts
 import System
 
@@ -25,6 +27,8 @@ act = do
   case args of
     ["--help"]                     => stdoutLn usage
     "copy"                    :: t => Copy.prog t
+    "copyh"                   :: t => CopyWithHoles.prog t
+    "seek"                    :: t => Seek.prog t
     "loop"                    :: t => loop 1_000_000
     _                              => stdoutLn usage
 
