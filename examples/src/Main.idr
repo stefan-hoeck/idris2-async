@@ -33,17 +33,12 @@ act = do
     _                              => stdoutLn usage
 
 covering
-run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> IO ()
-run threads = app threads [] $ handle handlers act
+main : IO ()
+main = do
+  simpleApp $ handle handlers act
+  exitSuccess
+
   where
     handlers : All (Handler () EpollST) [Errno,ArgErr]
     handlers = [prettyOut,prettyOut]
 
-covering
-main : IO ()
-main = do
-  s <- getEnv "IDRIS2_ASYNC_THREADS"
-  case cast {to = Nat} <$> s of
-    Just (S k) => run (S k)
-    _          => run 4
-  exitSuccess
