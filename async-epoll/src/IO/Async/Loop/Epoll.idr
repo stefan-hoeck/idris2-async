@@ -4,6 +4,7 @@ import public Data.Nat
 import Data.Array.Core as AC
 import Data.Array.Mutable
 import Data.Bits
+import Data.DPair
 import Data.Linear.Traverse1
 import Data.Queue
 import Data.Vect
@@ -12,6 +13,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Signal
 
 import public IO.Async
 import public IO.Async.Loop
@@ -251,10 +253,9 @@ workSTs maxFiles qs (S k) = do
 ||| Create a new thread pool of `n` worker threads and additional
 covering
 mkThreadPool :
-     (n : Nat)
-  -> {auto 0 p : IsSucc n}
+     (n : Subset Nat IsSucc)
   -> IO (ThreadPool, EventLoop EpollST)
-mkThreadPool (S k) = do
+mkThreadPool (Element (S k) _) = do
   qs <- newIOArray (S k) (Queue.empty {a = Package EpollST})
   let mfs := sysconf SC_OPEN_MAX
   ws <- workSTs (cast mfs) qs (S k)
@@ -262,20 +263,56 @@ mkThreadPool (S k) = do
   let tp := TP k ts ws
   pure (tp, EL submit cede (head ws))
 
+||| Starts an epoll-based event loop and runs the given async
+||| program to completion.
+|||
+||| `n`    : Number of threads to use
+||| `sigs` : The signals to block while running the program.
+|||          These are typically the ones dealt with as part of `prog`
+||| `prog` : The program to run
 export covering
 app :
-     (n : Nat)
-  -> {auto 0 p : IsSucc n}
-  -> List Signal
-  -> Async EpollST [] ()
+     (n    : Subset Nat IsSucc)
+  -> (sigs : List Signal)
+  -> (prog : Async EpollST [] ())
   -> IO ()
-app n sigs act = do
+app n sigs prog = do
   sigprocmask SIG_BLOCK sigs
   (tp,el) <- mkThreadPool n
   tg <- newTokenGen
-  runAsyncWith 1024 el act (\_ => putStrLn "Done. Shutting down" >> stop tp)
+  runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
   let wst := head tp.workers
   runIO $ steal wst wst.me wst.size
   traverse_ (\x => threadWait x) tp.ids
   traverse_ release tp.workers
   usleep 100
+
+||| Reads environment variable `IDRIS2_ASYNC_THREADS` and returns
+||| the number of threads to use. Default: 2.
+export
+asyncThreads : IO (Subset Nat IsSucc)
+asyncThreads = do
+  s <- getEnv "IDRIS2_ASYNC_THREADS"
+  pure $ case cast {to = Nat} <$> s of
+    Just (S k) => Element (S k) %search
+    _          => Element 2 %search
+
+||| Simplified version of `app`.
+|||
+||| We use environment variable `IDRIS2_ASYNC_THREADS` to determine the
+||| number of threads to use (default: 2) and cancel the running program
+||| on receiving `SIGINT`. Other signals are not supported.
+export covering
+simpleApp : Async EpollST [] () -> IO ()
+simpleApp prog = do
+  n <- asyncThreads
+  app n [SIGINT] cprog
+
+  where
+    cprog : Async EpollST [] ()
+    cprog =
+      ignore $ race
+        [ prog
+        , dropErrs {es = [Errno]} $ onSignal SIGINT (pure ())
+        ]
+
