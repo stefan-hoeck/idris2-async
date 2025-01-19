@@ -20,6 +20,7 @@ Before we start, let's import a couple of modules:
 ```idris
 module README
 
+import Data.DPair
 import Data.List
 import IO.Async.Loop.Epoll
 import IO.Async.Signal
@@ -399,7 +400,7 @@ act _                 = countSequentially
 
 -- `sigs` is used to block the default handling of the listed signals.
 covering
-run : (threads : Nat) -> {auto 0 _ : IsSucc threads} -> List String -> IO ()
+run : (threads : Subset Nat IsSucc) -> List String -> IO ()
 run threads args = app threads sigs $ handle handlers (act args)
   where
     sigs : List Signal
@@ -414,10 +415,8 @@ covering
 main : IO ()
 main = do
   _::t <- getArgs | _ => die "Invalid arguments"
-  s <- getEnv "IDRIS2_ASYNC_THREADS"
-  case cast {to = Nat} <$> s of
-    Just (S k) => run (S k) t
-    _          => run 4 t
+  n    <- asyncThreads
+  run n t
 ```
 
 <!-- vi: filetype=idris2:syntax=markdown
