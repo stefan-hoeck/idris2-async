@@ -397,19 +397,19 @@ parameters {auto has : Has Errno es}
 
   ||| Delay a computation by the given number of nanoseconds.
   export
-  waitTill : Clock Monotonic -> Async e es ()
-  waitTill cl = do
+  sleep : (dur : Clock Duration) -> Async e es ()
+  sleep dur = do
     ev <- env
-    primAsync $ \cb => primWaitTill ev cl $ \case
+    primAsync $ \cb => primWait ev dur $ \case
       Right _ => cb (Right ())
       Left  x => cb (Left $ inject x)
 
   ||| Delay a computation by the given number of nanoseconds.
   export
-  sleep : (dur : Clock Duration) -> Async e es ()
-  sleep dur = do
+  waitTill : Clock Monotonic -> Async e es ()
+  waitTill cl = do
     now <- liftIO (clockTime Monotonic)
-    waitTill (addDuration now dur)
+    sleep (timeDifference cl now)
 
   ||| Delay a computation by the given number of nanoseconds.
   export

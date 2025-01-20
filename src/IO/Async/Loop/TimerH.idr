@@ -8,8 +8,8 @@ import public System.Posix.Errno
 
 public export
 interface TimerH a where
-  primWaitTill :
+  primWait :
        a
-    -> Clock Monotonic
+    -> Clock Duration
     -> (Either Errno () -> IO1 ())
     -> IO1 (Bool -> IO1 ())
