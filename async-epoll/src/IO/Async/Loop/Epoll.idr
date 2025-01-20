@@ -311,7 +311,7 @@ simpleApp prog = do
   where
     cprog : Async EpollST [] ()
     cprog =
-      ignore $ race
+      race_
         [ prog
         , dropErrs {es = [Errno]} $ onSignal SIGINT (pure ())
         ]
