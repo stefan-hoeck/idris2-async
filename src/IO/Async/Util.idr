@@ -275,6 +275,14 @@ race (x :: y) =
     Just (Right (Just z)) => Just (There z)
     _                     => Nothing
 
+||| Runs several non-productive fibers in parallel, terminating
+||| as soon as the first one completes.
+export
+race_ : List (Async e es ()) -> Async e es ()
+race_ []       = pure ()
+race_ [x]      = x
+race_ (x :: y)  = ignore (race2 x $ race_ y)
+
 ||| Races the evaluation of two fibers and returns the [[Outcome]] of both. If the race is
 ||| canceled before one or both participants complete, then then whichever ones are incomplete
 ||| are canceled.
