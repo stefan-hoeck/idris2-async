@@ -386,10 +386,10 @@ parameters {auto tg : TokenGen}
 
   runC el act cc fbr st t =
     case act of
-      UC f   => run el (f fbr.token 1) 1 cc fbr st t
+      UC f   => run el (f fbr.token 1) 1 cc fbr (Dec::st) t
       Term x => case st of
         Bnd f :: tl  => case f x of
-          UC g => run el (g fbr.token 1) 1 cc fbr tl t
+          UC g => run el (g fbr.token 1) 1 cc fbr (Dec::tl) t
           a    => run el (pure ()) 1 cc fbr (hooks st) t
         Inc :: tl    => run el (Term x) 1 cc fbr tl t
         _           => run el (pure ()) 1 cc fbr (hooks st) t
