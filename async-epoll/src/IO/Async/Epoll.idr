@@ -172,15 +172,14 @@ htimer fd act (Right ev) t =
 
 export
 Epoll e => TimerH e where
-  primWaitTill s cl f t =
-    let now # t := ioToF1 (clockTime Monotonic) t
-     in case now >= cl of
-          True  => succ f () t
-          False =>
-            let ts     := TS (duration 0 0) (timeDifference cl now)
-                R fd t := timerfd CLOCK_MONOTONIC 0 t | E x t => fail f x t
-                R _  t := setTime fd 0 ts t | E x t => failClose fd f x t
-             in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (htimer fd f) t
+  primWait s dur f t =
+    case dur > duration 0 0 of
+      False =>
+        let ts     := TS (duration 0 0) dur
+            R fd t := timerfd CLOCK_MONOTONIC 0 t | E x t => fail f x t
+            R _  t := setTime fd 0 ts t | E x t => failClose fd f x t
+         in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (htimer fd f) t
+      True  => succ f () t
 
 hsig : Signalfd -> (Either Errno Siginfo -> IO1 ()) -> Either Errno Event -> IO1 ()
 hsig fd act (Left x)   t = act (Left x) t

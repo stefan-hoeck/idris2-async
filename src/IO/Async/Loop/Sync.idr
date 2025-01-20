@@ -38,8 +38,10 @@ record SyncST where
 
 export
 TimerH SyncST where
-  primWaitTill s c act t =
-    let ref # t := refIO False t
+  primWait s dur act t =
+    let now # t := ioToF1 (clockTime Monotonic) t
+        c       := addDuration now dur
+        ref # t := refIO False t
         _   # t := mod1 s.timers (insertWith (++) c [T ref act]) t
      in const (write1 ref True) # t
 
