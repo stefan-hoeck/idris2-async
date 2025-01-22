@@ -29,7 +29,6 @@ modules = IO.Async
         , IO.Async.Internal.Concurrent
         , IO.Async.Internal.Loop
         , IO.Async.Internal.Ref
-        , IO.Async.Internal.Timer
         , IO.Async.Internal.Token
 
 sourcedir = "src"

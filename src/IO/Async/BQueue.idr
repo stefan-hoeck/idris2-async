@@ -62,7 +62,7 @@ enqueue : BQueue a -> a -> Async e es ()
 enqueue (BQ ref) v = do
   def <- deferredOf ()
   uncancelable $ \poll => do
-    act <- runIO $ casupdate1 ref (enq poll def v)
+    act <- update ref (enq poll def v)
     act
 
 ||| Extracts the next value from a bounded queue potentially blocking
@@ -72,5 +72,5 @@ dequeue : BQueue a -> Async e es a
 dequeue (BQ ref) = do
   def <- deferredOf a
   uncancelable $ \poll => do
-    act <- runIO $ casupdate1 ref (deq poll def)
+    act <- update ref (deq poll def)
     act

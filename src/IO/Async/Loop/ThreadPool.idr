@@ -20,7 +20,6 @@ import public IO.Async
 import public IO.Async.Loop
 
 import IO.Async.Internal.Ref
-import IO.Async.Internal.Timer
 import IO.Async.Internal.Token
 import Data.Linear.Traverse1
 import Data.List
