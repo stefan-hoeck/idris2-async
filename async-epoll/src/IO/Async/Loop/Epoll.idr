@@ -76,12 +76,6 @@ getHandle s f t =
     Just v  => AC.get s.handles v t
     Nothing => hdummy # t
 
-setHandle : EpollST -> Fd -> FileHandle -> IO1 ()
-setHandle s f fh t =
-  case tryNatToFin (cast f.fd) of
-    Just v  => AC.set s.handles v fh t
-    Nothing => () # t
-
 -- initialize the state of a worker thread.
 workST :
      {n : Nat}
@@ -161,39 +155,91 @@ steal s x (S k) t =
 -- Interfaces
 --------------------------------------------------------------------------------
 
-%inline
-ctl  : EpollST -> EpollOp -> Fd -> Event -> EPrim ()
-ctl s op fd ev = epollCtl s.epoll op fd ev
+parameters (s         : EpollST)
+           (fd        : Fd)
+           (ev        : Event)
+           (autoClose : Bool)
+           (cb        : Either Errno Event -> IO1 ())
 
-closeIf : Fd -> Bool -> IO1 ()
-closeIf fd True  t = toF1 (close' fd) t
-closeIf fd False t = () # t
+  -- calls `epoll_ctl` via the FFI to handle the file descriptor
+  %inline
+  ctl  : EpollOp -> EPrim ()
+  ctl op = epollCtl s.epoll op fd ev
 
-removeHandle : EpollST -> Fd -> Bool -> IO1 ()
-removeHandle s fd autoClose t =
-  case ctl s Del fd 0 t of
-    R _ t => closeIf fd autoClose t
-    E _ t => closeIf fd autoClose t
+  -- close the file descriptor if `autoClose` is set to `True`
+  -- this must be done *after* invoking `cb`.
+  %inline
+  closefd : IO1 ()
+  closefd = when1 autoClose (toF1 $ close' fd)
 
-pollFile :
-     EpollST
-  -> Fd
-  -> Event
-  -> (autoClose : Bool)
-  -> (Either Errno Event -> IO1 ())
-  -> IO1 (Bool -> IO1 ())
-pollFile s file ev ac fh t =
-  let fd    := cast {to = Fd} file
-      _ # t := setHandle s fd (fh . Right) t
-   in case ctl s Add fd ev t of
-        R _ t => const (removeHandle s fd ac) # t
+  -- resets the file handle to `hdummy` and removes `fd` from the epoll set
+  %inline
+  cleanup : Fin s.maxFiles -> IO1 ()
+  cleanup v t =
+    let _ # t := AC.set s.handles v hdummy t
+     in io1 (ctl Del) t
+
+  -- invokes `cleanup` before running the file handle, and closes
+  -- the file descriptor in case `autoClose` is set to `True`.
+  %inline
+  act : Fin s.maxFiles -> FileHandle
+  act v e t =
+    let _ # t := Epoll.cleanup v t
+        _ # t := cb (Right e) t
+     in closefd t
+
+  -- we got a result before the file handle was registered.
+  -- we invoke the callback and close the file returning a
+  -- dummy cleanup hook
+  %inline
+  abrt : Either Errno Event -> IO1 (IO1 ())
+  abrt res t =
+    let _ # t := cb res t
+        _ # t := closefd t
+     in dummy # t
+
+  -- cancelation hook: like `act` but without invoking the callback
+  %inline
+  cncl : Fin s.maxFiles -> FileHandle
+  cncl v e t =
+    let _ # t := Epoll.cleanup v t
+     in closefd t
+
+  pollFile : IO1 (IO1 ())
+  pollFile t =
+    -- tries to convert the file descriptor to an index into the array
+    -- of file descriptors
+    case tryNatToFin (cast fd.fd) of
+      -- now trying to register the file descriptor at epoll
+      Just v  => case ctl Add t of
+        -- oops, this failed
         E x t => case x == EPERM of
-          True =>
-            let _ # t := fh (Right ev) t
-             in const (closeIf fd ac) # t
-          False =>
-            let _ # t := fh (Left x) t
-             in const (closeIf fd ac) # t
+          -- not a pollable file descriptor. we just invoke the callback with the
+          -- given `Event`. this allows us to use the event loop even with
+          -- regular files, giving us a single interface for asynchronous
+          -- reading and writing of files
+          True  => abrt (Right ev) t
+
+          -- there was another event. pass it to the callback
+          False => abrt (Left x) t
+
+        -- success! We now register an event handler to be invoked
+        -- once an epoll event is ready. care must be taken to only cleanup
+        -- stuff once, lest we cleanup a new file descriptor while this one
+        -- has been closed in the meantime
+        R _ t   =>
+         let -- atomic boolean flag indicating if the handle is still active
+             -- this will be atomically set to `False` (using `once`)
+             -- before running or canceling the file handle
+             --
+             -- `cleanup` needs to be atomic because there is a race condition
+             -- between running the file handle once an event is ready and
+             -- cancelation, which might happen externally and from a different
+             -- thread
+             r # t := refIO True t
+             _ # t := AC.set s.handles v (\e => once r (act v e)) t
+          in once r (cleanup v) # t
+      Nothing => abrt (Left EINVAL) t
 
 export %inline
 Epoll EpollST where
@@ -315,4 +361,3 @@ simpleApp prog = do
         [ prog
         , dropErrs {es = [Errno]} $ onSignal SIGINT (pure ())
         ]
-

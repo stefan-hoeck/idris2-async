@@ -6,6 +6,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Ref
 import System.Clock
 import System
+import System.Posix.Errno
 
 %default total
 
@@ -24,6 +25,13 @@ data Work : Type where
 export
 dummy : IO1 ()
 dummy = \t => () # t
+
+export %inline
+io1 : EPrim () -> IO1 ()
+io1 act t =
+  case act t of
+    R _ t => () # t
+    E _ t => () # t
 
 ||| `IO1` version of `die`
 export %inline
@@ -44,22 +52,6 @@ done t = Done # t
 export %inline
 work : IO1 () -> IO1 Work
 work w t = W w # t
-
--- ||| This will wait on the give condition and return with `noWork`
--- ||| once it awakes. The calling loop will then be responsible to ask
--- ||| for more work.
--- export %inline
--- waitNoWork : Condition -> Mutex -> IO1 Work
--- waitNoWork c m w = let MkIORes _ w := conditionWait c m w in noWork w
--- 
--- ||| This will wait on the give condition with a timeout
--- ||| and return with `noWork` once it awakes. The calling loop
--- ||| will then be responsible to ask for more work.
--- export %inline
--- sleepNoWork : Condition -> Mutex -> Integer -> IO1 Work
--- sleepNoWork c m us w =
---   let MkIORes _ w := conditionWaitTimeout c m us w
---    in noWork w
 
 ||| Tail-recursively runs a list of `IO1` actions
 export

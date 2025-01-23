@@ -43,7 +43,7 @@ TimerH SyncST where
         c       := addDuration now dur
         ref # t := refIO False t
         _   # t := mod1 s.timers (insertWith (++) c [T ref act]) t
-     in const (write1 ref True) # t
+     in write1 ref True # t
 
 --------------------------------------------------------------------------------
 -- Loop Implementation
