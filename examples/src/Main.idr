@@ -3,6 +3,9 @@ module Main
 import Example.CH4.Copy
 import Example.CH4.CopyWithHoles
 import Example.CH4.Seek
+
+import Profile.Timer
+
 import Opts
 import System
 
@@ -30,6 +33,7 @@ act = do
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
     "loop"                    :: t => loop 1_000_000
+    "profile-timer"           :: t => Profile.Timer.prog t
     _                              => stdoutLn usage
 
 covering

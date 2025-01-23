@@ -22,7 +22,7 @@ interface Epoll a where
     -> Event
     -> (autoClose : Bool)
     -> (Either Errno Event -> IO1 ())
-    -> IO1 (Bool -> IO1 ())
+    -> IO1 (IO1 ())
 
 parameters {auto has : Has Errno es}
            {auto ep  : Epoll e}
@@ -144,12 +144,13 @@ parameters {auto has : Has Errno es}
 --------------------------------------------------------------------------------
 
 %inline
-succ : (Either Errno a -> IO1 ()) -> a -> IO1 (Bool -> IO1 ())
-succ act x t = let _ # t := act (Right x) t in const dummy # t
+succ : (Either Errno a -> IO1 ()) -> a -> IO1 (IO1 ())
+succ act x t = let _ # t := act (Right x) t in dummy # t
 
 %inline
-fail : (Either Errno a -> IO1 ()) -> Errno -> IO1 (Bool -> IO1 ())
-fail act x t = let _ # t := act (Left x) t in const dummy # t
+fail : (Either Errno a -> IO1 ()) -> Errno -> IO1 (IO1 ())
+fail act x t = let _ # t := act (Left x) t in dummy # t
+
 
 %inline
 failClose :
@@ -157,11 +158,11 @@ failClose :
   -> b
   -> (Either Errno a -> IO1 ())
   -> Errno
-  -> IO1 (Bool -> IO1 ())
+  -> IO1 (IO1 ())
 failClose vb act x t =
   let _ # t := toF1 (close' vb) t
       _ # t := act (Left x) t
-   in const dummy # t
+   in dummy # t
 
 htimer : Timerfd -> (Either Errno () -> IO1 ()) -> Either Errno Event -> IO1 ()
 htimer fd act (Left  x)  t =  act (Left x) t

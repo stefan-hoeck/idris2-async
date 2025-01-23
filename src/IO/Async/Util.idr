@@ -181,7 +181,7 @@ racePair x y = do
     flip onCancel (cancel f1 >> cancel f2) $ primAsync $ \cb,t =>
       let c1 # t := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) t
           c2 # t := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) t
-       in (\b,t => let _ # t := c1 b t in c2 b t) # t
+       in (\t => let _ # t := c1 t in c2 t) # t
 
 ||| Awaits the completion of the bound fiber and returns its result once it completes.
 ||| 
@@ -381,7 +381,7 @@ primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
 primAsync_ f =
   primAsync $ \cb,t =>
     let _ # t := f cb t
-     in const dummy # t
+     in dummy # t
 
 --------------------------------------------------------------------------------
 -- Sleeping and Timed Execution
@@ -430,6 +430,15 @@ n.s = (n * 1_000_000).us
 export
 (.ms) : Nat -> Clock Duration
 n.ms = (n * 1000).us
+
+||| Runs an IO action, returning the time delta it took to run.
+export %inline
+delta : HasIO io => io () -> io (Clock Duration)
+delta act = do
+  c1 <- liftIO $ clockTime Monotonic
+  act
+  c2 <- liftIO $ clockTime Monotonic
+  pure (timeDifference c2 c1)
 
 --------------------------------------------------------------------------------
 -- Running `Async`

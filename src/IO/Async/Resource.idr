@@ -14,7 +14,7 @@ interface Resource a where
 ||| afterwards.
 export %inline
 use1 : Resource a => Async e es a -> (a -> Async e es b) -> Async e es b
-use1 alloc run = alloc >>= \r => guarantee (run r) (cleanup r)
+use1 alloc run = bracket alloc run cleanup
 
 ||| Like `use1` but for a heterogeneous list of resources.
 export

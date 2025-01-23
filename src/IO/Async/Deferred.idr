@@ -31,8 +31,8 @@ export %inline
 deferredOf : HasIO io => (0 a : _) -> io (Deferred a)
 deferredOf _ = deferred
 
-unobs : IORef (ST a) -> Bool -> IO1 ()
-unobs ref _ = casmod1 ref (const Ini)
+unobs : IORef (ST a) -> IO1 ()
+unobs ref = casmod1 ref (const Ini)
 
 ||| Atomically tries to write the given value to a `Deferred`.
 |||
@@ -61,6 +61,6 @@ await (D ref) =
      in act t
 
   where
-    upd : (a -> IO1 ()) -> ST a -> (ST a, IO1 (Bool -> IO1 ()))
-    upd cb (Val x) = (Val x, \t => let _ # t := cb x t in const dummy # t)
+    upd : (a -> IO1 ()) -> ST a -> (ST a, IO1 (IO1 ()))
+    upd cb (Val x) = (Val x, \t => let _ # t := cb x t in dummy # t)
     upd cb _       = (Obs cb, (unobs ref #))

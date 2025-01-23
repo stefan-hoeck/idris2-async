@@ -18,7 +18,7 @@ public export
 record Fiber (es : List Type) (a : Type) where
   constructor MkFiber
   cancel_  : IO1 ()
-  observe_ : Callback es a -> IO1 (Bool -> IO1 ())
+  observe_ : Callback es a -> IO1 (IO1 ())
 
 export
 data Async : (e : Type) -> (es : List Type) -> Type -> Type where
@@ -50,7 +50,7 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 
   Start : Async e es a -> Async e fs (Fiber es a)
 
-  Asnc   : ((Result es a -> IO1 ()) -> IO1 (Bool -> IO1 ())) -> Async e es a
+  Asnc   : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 
   -- Temporarily undo a layer of uncancelability
   APoll  : Token -> Nat -> Async e es a -> Async e es a
@@ -104,7 +104,7 @@ uncancelable f = UC $ \t,n => f (APoll t n)
 ||| be used for cancelation and cleanup. It is invoked with `True` in case
 ||| of cancelation and `False` in case of regular cleanup.
 export %inline
-primAsync : ((Result es a -> IO1 ()) -> IO1 (Bool -> IO1 ())) -> Async e es a
+primAsync : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 primAsync = Asnc
 
 ||| Starts a new fiber, running it concurrently to the current one
@@ -151,12 +151,6 @@ Monad (Async e es) where
 export %inline
 HasIO (Async e es) where
   liftIO = sync . map Right
-
-guaranteePrim : Async e es a -> (Bool -> IO1 ()) -> Async e es a
-guaranteePrim fa fin =
-  uncancelable $ \poll =>
-    let finalized := onCancel (poll fa) (runIO $ fin True)
-     in bind finalized $ \r => runIO (fin False) >> terminal r
 
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
@@ -214,8 +208,8 @@ newFiber el t =
 
 -- remove the observer identified by the given token from the
 -- list of callbacks.
-stopObserving : Nat -> FiberImpl e es a -> Bool -> IO1 ()
-stopObserving n fbr _ = casmod1 fbr.st {cbs $= filter ((n /=) . fst)}
+stopObserving : Nat -> FiberImpl e es a -> IO1 ()
+stopObserving n fbr = casmod1 fbr.st {cbs $= filter ((n /=) . fst)}
 
 -- Registeres a callback at a fiber
 -- If the fiber has already terminated (it is in its `Done` state),
@@ -223,13 +217,13 @@ stopObserving n fbr _ = casmod1 fbr.st {cbs $= filter ((n /=) . fst)}
 -- Otherwise, the callback is given a unique identifier and added to
 -- the fiber's list of callbacks. A cancel hook for removing the
 -- observer is returned in this case.
-observe : FiberImpl e es a -> Callback es a -> IO1 (Bool -> IO1 ())
+observe : FiberImpl e es a -> Callback es a -> IO1 (IO1 ())
 observe fbr cb t =
   case casupdate1 fbr.st observeAct t of
-    Left  act # t => let _ # t := act t in const dummy # t
+    Left  act # t => let _ # t := act t in dummy # t
     Right act # t => act # t
   where
-    observeAct : FiberST es a -> (FiberST es a, (Either (IO1 ()) (Bool -> IO1 ())))
+    observeAct : FiberST es a -> (FiberST es a, (Either (IO1 ()) (IO1 ())))
     observeAct s =
       case s.state of
         Done o => (s, Left $ cb o)
@@ -437,7 +431,7 @@ parameters {auto tg : TokenGen}
       Asnc f =>
         let res  # t := refIO Nothing t
             cncl # t := f (\r,t => let _ # t := put res r t in resume fbr t) t
-         in run el (guaranteePrim (Wait res) cncl) cm cc fbr st t
+         in run el (Wait res) cm cc fbr (Hook (runIO cncl) :: st) t
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
