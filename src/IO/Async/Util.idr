@@ -1,12 +1,16 @@
 module IO.Async.Util
 
+import Data.Array
+import Data.Array.Mutable
 import Data.Maybe
+import IO.Async.Deferred
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
 import IO.Async.Loop.Sync
 import IO.Async.Loop.TimerH
+import IO.Async.Semaphore
 import IO.Async.Type
 import System.Clock
 
@@ -224,7 +228,9 @@ raceOutcome fa fb =
     Left  (oc,f) => cancel f $> Left oc
     Right (f,oc) => cancel f $> Right oc
 
-||| Races the evaluation of two fibers that returns the result of the winner, except in the
+||| Races the evaluation of several fibers, returning the result
+||| of the winnner. The other fibers are canceled as soon as one of the
+||| fibers produced an outcome.
 ||| case of cancelation.
 ||| 
 ||| The semantics of [[race]] are described by the following rules:
@@ -233,10 +239,9 @@ raceOutcome fa fb =
 |||      value. The loser is canceled before returning.
 |||   2. If the winner completes with [[Outcome.Errored]], the race raises the error.
 |||      The loser is canceled before returning.
-|||   3. If the winner completes with [[Outcome.Canceled]], the race returns the
-|||      result of the loser, consistent with the first two rules.
-|||   4. If both the winner and loser complete with [[Outcome.Canceled]],
-|||      this returns `Nothing`
+|||   3. If the winner completes with [[Outcome.Canceled]], the race cancels
+|||      the loser and returns its result, fires an error, or returns `Nothing`
+|||      its outcome is `Canceled`.
 ||| 
 ||| @param fa
 |||   the effect for the first racing fiber
@@ -252,36 +257,50 @@ race2 fa fb =
     Left  (oc,f) => case oc of
       Succeeded res => cancel f $> Just (Left res)
       Error err     => cancel f >> fail err
-      Canceled      => join f >>= \case
+      Canceled      => cancel f >> join f >>= \case
         Succeeded res => pure $ Just (Right res)
         Error err     => fail err
         Canceled      => pure Nothing
     Right (f,oc) => case oc of
       Succeeded res => cancel f $> Just (Right res)
       Error err     => cancel f >> fail err
-      Canceled      => join f >>= \case
+      Canceled      => cancel f >> join f >>= \case
         Succeeded res => pure $ Just (Left res)
         Error err     => fail err
         Canceled      => pure Nothing
 
 ||| This generalizes `race2` to an arbitrary heterogeneous list.
 export
-race : All (Async e es) ts -> Async e es (Maybe $ HSum ts)
-race []       = pure Nothing
-race [x]      = map (Just . Here) x
-race (x :: y) =
-  flip map (race2 x $ race y) $ \case
+hrace : All (Async e es) ts -> Async e es (Maybe $ HSum ts)
+hrace []       = pure Nothing
+hrace [x]      = map (Just . Here) x
+hrace (x :: y) =
+  flip map (race2 x $ hrace y) $ \case
     Just (Left z)         => Just (Here z)
     Just (Right (Just z)) => Just (There z)
     _                     => Nothing
 
+||| A more efficient, monomorphic version of `hrace` with slightly
+||| different semantics: The winner decides the outcome of the are
+||| even if it has been cancele.
+export
+race : List (Async e es a) -> Async e es (Maybe a)
+race []  = pure Nothing
+race [x] = map Just x
+race xs  =
+  uncancelable $ \poll => do
+    def <- deferredOf (Outcome es a)
+    fs  <- traverse (\f => start $ guaranteeCase f (put def)) xs
+    flip guarantee (traverse_ cancel fs) $ await def >>= \case
+      Succeeded res => pure (Just res)
+      Error err     => fail err
+      Canceled      => pure Nothing
+
 ||| Runs several non-productive fibers in parallel, terminating
 ||| as soon as the first one completes.
-export
+export %inline
 race_ : List (Async e es ()) -> Async e es ()
-race_ []       = pure ()
-race_ [x]      = x
-race_ (x :: y)  = ignore (race2 x $ race_ y)
+race_ = ignore . race
 
 ||| Races the evaluation of two fibers and returns the [[Outcome]] of both. If the race is
 ||| canceled before one or both participants complete, then then whichever ones are incomplete
@@ -348,7 +367,7 @@ both fa fb =
       Error err     => cancel f >> fail err
       Canceled      => cancel f >> pure Nothing
 
-||| Runs the given heterogeneous lists of asynchronous computations
+||| Runs the given heterogeneous list of asynchronous computations
 ||| in parallel, collecting the results again in a heterogeneous list.
 export
 par : All (Async e es) ts -> Async e es (Maybe $ HList ts)
@@ -359,17 +378,66 @@ par (h::t) =
     Just (h2,Just t2) => Just (h2::t2)
     _                 => Nothing
 
+parstart :
+     SnocList (Fiber es a)
+  -> IOArray n (Outcome es a) 
+  -> Semaphore
+  -> (k : Nat)
+  -> {auto 0 lte : LTE k n}
+  -> List (Async e es a)
+  -> Async e es (List $ Fiber es a)
+parstart sx arr sem (S k) (x::xs) = do
+  fib <- start $ guaranteeCase x $ \case
+    Canceled => releaseAll sem
+    o        => runIO (setNat arr k o) >> release sem 
+  parstart (sx:<fib) arr sem k xs
+parstart sx arr sem _ _ = pure (sx <>> [])
+
+collect :
+     SnocList a
+  -> IOArray n (Outcome es a)
+  -> (k : Nat)
+  -> {auto 0 lte : LTE k n}
+  -> Bool
+  -> IO1 (Outcome es $ List a)
+collect sx arr 0     b t =
+  if b then Succeeded (sx <>> []) # t else Canceled # t
+collect sx arr (S k) b t =
+  case getNat arr k t of
+    Succeeded v # t => collect (sx:<v) arr k b t
+    Error x # t     => Error x # t
+    Canceled # t    => collect sx arr k False t
+
+marr : HasIO io => (n : Nat) -> io (k ** IOArray k (Outcome es a))
+marr n = do
+  arr <- newIOArray n Canceled
+  pure (n ** arr)
+
+||| Runs the given list of computations in parallel.
+|||
+||| This fails with an error, as soon as the first computation
+||| fails, and it returns `Nothing` as soon as the first computation
+||| is canceled.
+export
+parseq : List (Async e es a) -> Async e es (Maybe $ List a)
+parseq xs =
+  uncancelable $ \poll => do
+    (n ** arr) <- marr (length xs)
+    sem        <- semaphore n
+    fs         <- parstart [<] arr sem n xs
+    flip guarantee (traverse_ cancel fs) $ poll $ do
+      await sem
+      runIO (collect [<] arr n True) >>= \case
+        Succeeded vs => pure (Just vs)
+        Error  x     => fail x
+        Canceled     => pure Nothing
+
 ||| Traverses a list of values effectfully in parallel.
 |||
 ||| This returns `Nothing` if one of the fibers was canceled.
-export
+export %inline
 parTraverse : (a -> Async e es b) -> List a -> Async e es (Maybe $ List b)
-parTraverse f []     = pure (Just [])
-parTraverse f [x]    = map (Just . pure) (f x)
-parTraverse f (h::t) =
-  flip map (both (f h) (parTraverse f t)) $ \case
-    Just (h2,Just t2) => Just (h2::t2)
-    _                 => Nothing
+parTraverse f = parseq . map f
 
 --------------------------------------------------------------------------------
 -- Async Utilitis

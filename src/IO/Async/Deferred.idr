@@ -1,9 +1,9 @@
 module IO.Async.Deferred
 
 import Data.Linear.Ref1
-import IO.Async
 import IO.Async.Internal.Loop
 import IO.Async.Loop
+import IO.Async.Type
 
 %default total
 
@@ -53,6 +53,10 @@ put (D ref) v =
 
 ||| Waits (possibly by semantically blocking the fiber)
 ||| until a value is available from a `Deferred`.
+|||
+||| Note: Currently, `Deferred` values can only be observed
+|||       by one observer. The calling fiber will block until
+|||       canceled, if another fiber has called `await` already.
 export
 await : Deferred a -> Async e es a
 await (D ref) =
@@ -63,4 +67,5 @@ await (D ref) =
   where
     upd : (a -> IO1 ()) -> ST a -> (ST a, IO1 (IO1 ()))
     upd cb (Val x) = (Val x, \t => let _ # t := cb x t in dummy # t)
-    upd cb _       = (Obs cb, (unobs ref #))
+    upd cb Ini     = (Obs cb, (unobs ref #))
+    upd cb x       = (x, (dummy #))
