@@ -16,6 +16,7 @@ modules = IO.Async
         , IO.Async.Outcome
         , IO.Async.Posix
         , IO.Async.Resource
+        , IO.Async.Semaphore
         , IO.Async.Signal
         , IO.Async.Type
         , IO.Async.Util
