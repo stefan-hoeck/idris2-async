@@ -164,24 +164,6 @@ failClose vb act x t =
       _ # t := act (Left x) t
    in dummy # t
 
-htimer : Timerfd -> (Either Errno () -> IO1 ()) -> Either Errno Event -> IO1 ()
-htimer fd act (Left  x)  t =  act (Left x) t
-htimer fd act (Right ev) t = 
-  case hasEvent ev EPOLLIN of
-    True  => act (Right ()) t
-    False => act (Left EINVAL) t
-
-export
-Epoll e => TimerH e where
-  primWait s dur f t =
-    case dur > duration 0 0 of
-      True =>
-        let ts     := TS (duration 0 0) dur
-            R fd t := timerfd CLOCK_MONOTONIC 0 t | E x t => fail f x t
-            R _  t := setTime fd 0 ts t | E x t => failClose fd f x t
-         in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (htimer fd f) t
-      False => succ f () t
-
 hsig : Signalfd -> (Either Errno Siginfo -> IO1 ()) -> Either Errno Event -> IO1 ()
 hsig fd act (Left x)   t = act (Left x) t
 hsig fd act (Right ev) t =

@@ -13,6 +13,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
 import public IO.Async
@@ -97,6 +98,9 @@ record EpollST where
   ||| at the same time
   stealers : IORef Nat
 
+  ||| State for schedule actions
+  timer : Timer
+
 public export
 0 Task : Type
 Task = Package EpollST
@@ -116,7 +120,8 @@ workST me maxFiles queues stealers =
         handles # t := arrayIO maxFiles hdummy t
         events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
         epoll   # t := dieOnErr (epollCreate 0) t
-     in W n me alive ceded queues maxFiles handles events epoll stealers # t
+        tim     # t := TimerST.timer t
+     in W n me alive ceded queues maxFiles handles events epoll stealers tim # t
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -207,11 +212,13 @@ parameters (s : EpollST)
       Stop # t => () # t
       Run  # t => case cpoll of
         0   => let n # t := poll 0 t in loop n t
-        S k => case next t of
-          Just tsk # t => let _ # t := tsk.act t in loop k t
-          Nothing  # t =>
-            let n # t := poll 1 t
-             in loop n t
+        S k =>
+         let _ # t := runDueTimers s.timer t
+          in case next t of
+               Just tsk # t => let _ # t := tsk.act t in loop k t
+               Nothing  # t =>
+                let n # t := poll 1 t
+                 in loop n t
 
 release : EpollST -> IO ()
 release s = do
@@ -311,6 +318,10 @@ parameters (s         : EpollST)
 export %inline
 Epoll EpollST where
   primEpoll = pollFile
+
+export %inline
+TimerH EpollST where
+  primWait s dur f = schedule s.timer dur (f (Right ()))
 
 --------------------------------------------------------------------------------
 -- ThreadPool
