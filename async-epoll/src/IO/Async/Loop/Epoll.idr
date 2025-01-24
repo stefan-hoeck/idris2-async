@@ -52,29 +52,54 @@ hdummy = \_ => dummy
 -- EpollST
 --------------------------------------------------------------------------------
 
+POLL_ITER : Nat
+POLL_ITER = 16
+
 -- State of a physical worker thread in a thread-pool.
 export
 record EpollST where
   constructor W
+  ||| Number of worker threads in the pool
   size     : Nat
+
+  ||| Index of the worker thread corresponding to this state
   me       : Fin size
+
+  ||| Reference indicating whether the pool is still alive
   alive    : IORef Alive
-  empty    : IORef Bool
+
+  ||| Recently ceded work package. Since switching threads is
+  ||| a costly operation, we want to prevent this from being
+  ||| rescheduled (stolen by other workers) when this worker's
+  ||| queue is empty.
+  ceded    : IORef (Maybe $ Package EpollST)
+
+  ||| Work queues of all worker threads
   queues   : IOArray size (Queue $ Package EpollST)
+
+  ||| Maximum number of files that can be opened (based
+  ||| on reading the corresponding system limit at
+  ||| startup)
   maxFiles : Nat
+
+  ||| File event handles. This are invoked after receiving
+  ||| events from `epoll`
   handles  : IOArray maxFiles FileHandle
+
+  ||| C array used to store file events during polling.
   events   : CArrayIO maxFiles SEpollEvent
+
+  ||| The `epoll` file descriptor used for polling
   epoll    : Epollfd
+
+  ||| Remaining number of stealers. To reduce contention,
+  ||| not all idle workers will be allowed to steal work
+  ||| at the same time
+  stealers : IORef Nat
 
 public export
 0 Task : Type
 Task = Package EpollST
-
-getHandle : EpollST -> Fd -> IO1 FileHandle
-getHandle s f t =
-  case tryNatToFin (cast f.fd) of
-    Just v  => AC.get s.handles v t
-    Nothing => hdummy # t
 
 -- initialize the state of a worker thread.
 workST :
@@ -82,74 +107,116 @@ workST :
   -> Fin n
   -> (maxFiles : Nat)
   -> IOArray n (Queue Task)
+  -> (stealers : IORef Nat)
   -> IO EpollST
-workST me maxFiles queues =
+workST me maxFiles queues stealers =
   runIO $ \t =>
-    let empty   # t := refIO True t
-        alive   # t := refIO Run t
+    let alive   # t := refIO Run t
+        ceded   # t := refIO Nothing t
         handles # t := arrayIO maxFiles hdummy t
         events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
         epoll   # t := dieOnErr (epollCreate 0) t
-     in W n me alive empty queues maxFiles handles events epoll # t
+     in W n me alive ceded queues maxFiles handles events epoll stealers # t
+
+--------------------------------------------------------------------------------
+-- Work Loop
+--------------------------------------------------------------------------------
+
+nextFin : {n : _} -> Fin n -> Fin n
+nextFin FZ     = last
+nextFin (FS x) = weaken x
+
+%inline
+elog : String -> IO1 ()
+elog s = (() #) -- toF1 (File.Prim.stdoutLn s)
+
+parameters (s : EpollST)
+
+  %inline
+  getHandle : Fd -> IO1 FileHandle
+  getHandle f t =
+    case tryNatToFin (cast f.fd) of
+      Just v  => AC.get s.handles v t
+      Nothing => hdummy # t
+
+  handleEvs : List EpollEvent -> IO1 Nat
+  handleEvs []            t = POLL_ITER # t
+  handleEvs (E ev fd::es) t =
+    let h # t := getHandle fd t
+        _ # t := h ev t
+     in  handleEvs es t
+
+  -- Uses `epoll` to poll for file events. As long as we have
+  -- other work to do, `timeout` will be 0, and this funtion will only
+  -- be invoked after every `POLL_ITER` iteration of the work loop.
+  --
+  -- If we go to sleep, `timeout` will be set to 1 ms.
+  %inline
+  poll : Int32 -> IO1 Nat
+  poll timeout t =
+    let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
+     in handleEvs vs t
+
+  -- appends the currently ceded task (if any) to the work queue,
+  -- because we have other work to do
+  %inline
+  uncede : IO1 ()
+  uncede t =
+    let Just tsk # t := read1 s.ceded t | Nothing # t => () # t
+        _        # t := write1 s.ceded Nothing t
+     in enqAt s.queues s.me tsk t
+
+  -- tries to steal a task from another worker
+  steal : Fin s.size -> Nat -> IO1 (Maybe Task)
+  steal x 0     t = Nothing # t
+  steal x (S k) t =
+    case deqAt s.queues x t of
+      Nothing  # t => steal (nextFin x) k t
+      Just tsk # t =>
+        let _ # t := write1 tsk.env s t
+         in Just tsk # t
+
+  -- Looks for the next task to run. If possible, this will be the
+  -- last ceded task of this work loop, unless our queue is non-empty,
+  -- in which case the ceded task has to be appended to the queue.
+  --
+  -- If there is no task, we go stealing from other work loops unless
+  -- too many stealers are already active.
+  %inline
+  next : IO1 (Maybe Task)
+  next t =
+    case deqAt s.queues s.me t of
+      Nothing  # t => case read1 s.ceded t of
+        Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
+          0   # t => Nothing # t
+          S k # t =>
+            let tsk # t := steal (nextFin s.me) (pred s.size) t
+                _   # t := casmod1 s.stealers S t
+             in tsk # t
+        tsk     # t => let _ # t := write1 s.ceded Nothing t in tsk # t
+      tsk # t => let _ # t := uncede t in tsk # t
+
+  -- Main worker loop. If `cpoll` is at zero, this indicates that we should
+  -- poll at this iteration. Otherwise we look for the next task to run.
+  -- If there is none, we go to sleep (that is, we `poll` with a timeout
+  -- of 1 ms).
+  covering
+  loop : Nat -> IO1 ()
+  loop cpoll t =
+    case read1 s.alive t of
+      Stop # t => () # t
+      Run  # t => case cpoll of
+        0   => let n # t := poll 0 t in loop n t
+        S k => case next t of
+          Just tsk # t => let _ # t := tsk.act t in loop k t
+          Nothing  # t =>
+            let n # t := poll 1 t
+             in loop n t
 
 release : EpollST -> IO ()
 release s = do
   free s.events
   fromPrim (close' s.epoll)
-
-next : {n : _} -> Fin n -> Fin n
-next FZ     = last
-next (FS x) = weaken x
-
-covering
-steal : (s : EpollST) -> Fin s.size -> Nat -> IO1 ()
-
-logTimeout : Int32 -> IO1 ()
-logTimeout 0 t = () # t
-logTimeout n t = toF1 (stdoutLn "sleeping for \{show n} ms") t
-
-logEvs : List EpollEvent -> IO1 ()
-logEvs es t =
-  case length es < 2 of
-    True => () # t
-    False => toF1 (stdoutLn "got \{show $ length es} epoll events") t
-
-covering
-poll : (s : EpollST) -> Int32 -> IO1 ()
-poll s timeout t =
-  let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
-   in go vs t
-
-  where
-    go : List EpollEvent -> IO1 ()
-    go []            t = () # t
-    go (E ev fd::es) t =
-      let h # t := getHandle s fd t
-          _ # t := h ev t
-       in  go es t
-
-covering %inline
-cont : EpollST -> Package EpollST -> IO1 ()
-cont s pkg t =
-  let _ # t := write1 pkg.env s t
-      _ # t := pkg.act t
-   in poll s 0 t
-
-covering
-loop : EpollST -> Package EpollST -> IO1 ()
-loop s pkg t =
-  let Run # t := read1 s.alive t | _ # t => () # t
-      _   # t := cont s pkg t
-   in steal s s.me s.size t
-
-steal s x 0     t =
-  let _   # t := poll s 1 t
-      Run # t := read1 s.alive t | _ # t => () # t
-   in steal s s.me s.size t
-steal s x (S k) t =
-  case deqAt s.queues x t of
-    Nothing  # t => steal s (next x) k t
-    Just pkg # t => loop s pkg t
 
 --------------------------------------------------------------------------------
 -- Interfaces
@@ -261,40 +328,35 @@ record ThreadPool where
   ids     : Vect size ThreadID
   workers : Vect (S size) EpollST
 
-||| Sets the `stopped` flag of all worker threads and awaits
-||| their termination.
 stop : ThreadPool -> IO ()
 stop tp = runIO $ traverse1_ (\w => write1 w.alive Stop) tp.workers
 
-||| Submit a new `IO` action to be processed by the worker threads
-||| in a thread pool.
-submit : Package EpollST -> IO1 ()
+submit : Task -> IO1 ()
 submit p t =
   let st # t := read1 p.env t
    in enqAt st.queues st.me p t
 
-covering
-cede : Package EpollST -> IO1 ()
+cede : Task -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
-   in case deqAt st.queues st.me t of
-        Nothing  # t => cont st p t
-        Just pkg # t =>
-          let _ # t := enqAt st.queues st.me p t
-           in cont st pkg t
+   in write1 st.ceded (Just p) t
 
 workSTs :
      {n : _}
   -> (maxFiles : Nat)
-  -> IOArray n (Queue $ Package EpollST)
+  -> IOArray n (Queue Task)
+  -> (stealers : IORef Nat)
   -> (k : Nat)
   -> {auto 0 lte : LTE k n}
   -> IO (Vect k EpollST)
-workSTs maxFiles qs 0     = pure []
-workSTs maxFiles qs (S k) = do
-  w  <- workST (natToFinLT k) maxFiles qs
-  ws <- workSTs maxFiles qs k
+workSTs maxFiles qs stealers 0     = pure []
+workSTs maxFiles qs stealers (S k) = do
+  w  <- workST (natToFinLT k) maxFiles qs stealers
+  ws <- workSTs maxFiles qs stealers k
   pure (w::ws)
+
+half : Nat -> Nat
+half n = cast (cast n `div` (the Integer 2))
 
 ||| Create a new thread pool of `n` worker threads and additional
 covering
@@ -304,8 +366,9 @@ mkThreadPool :
 mkThreadPool (Element (S k) _) = do
   qs <- newIOArray (S k) (Queue.empty {a = Package EpollST})
   let mfs := sysconf SC_OPEN_MAX
-  ws <- workSTs (cast mfs) qs (S k)
-  ts <- traverse (\x => fork (runIO $ steal x x.me x.size)) (tail ws)
+  ss <- newIORef (half $ S k)
+  ws <- workSTs (cast mfs) qs ss (S k)
+  ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   let tp := TP k ts ws
   pure (tp, EL submit cede (head ws))
 
@@ -327,8 +390,7 @@ app n sigs prog = do
   (tp,el) <- mkThreadPool n
   tg <- newTokenGen
   runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
-  let wst := head tp.workers
-  runIO $ steal wst wst.me wst.size
+  runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
   traverse_ release tp.workers
   usleep 100
