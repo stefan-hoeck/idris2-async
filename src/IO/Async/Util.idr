@@ -484,18 +484,23 @@ parameters {auto has : Has Errno es}
   delay : (dur : Clock Duration) -> Async e es a -> Async e es a
   delay dur act = sleep dur >> act
 
+||| Converts a number to nanoseconds
+export %inline
+(.ns) : Nat -> Clock Duration
+n.ns = fromNano (cast n)
+
 ||| Converts a number of microseconds to nanoseconds
-export
+export %inline
 (.us) : Nat -> Clock Duration
-n.us = fromNano . cast $ n * 1_000
+n.us = (n * 1_000).ns
 
 ||| Converts a number of seconds to nanoseconds
-export
+export %inline
 (.s) : Nat -> Clock Duration
 n.s = (n * 1_000_000).us
 
 ||| Converts a number of milliseconds to nanoseconds
-export
+export %inline
 (.ms) : Nat -> Clock Duration
 n.ms = (n * 1000).us
 

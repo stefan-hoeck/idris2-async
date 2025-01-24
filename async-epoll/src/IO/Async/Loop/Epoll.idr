@@ -135,6 +135,9 @@ nextFin (FS x) = weaken x
 elog : String -> IO1 ()
 elog s = (() #) -- toF1 (File.Prim.stdoutLn s)
 
+pollDuration : Integer -> Clock Duration
+pollDuration n = (cast $ min n 1_000_000).ns -- at most one milli second
+
 parameters (s : EpollST)
 
   %inline
@@ -157,9 +160,9 @@ parameters (s : EpollST)
   --
   -- If we go to sleep, `timeout` will be set to 1 ms.
   %inline
-  poll : Int32 -> IO1 Nat
-  poll timeout t =
-    let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
+  poll : (timeout : Clock Duration) -> IO1 Nat
+  poll to t =
+    let vs # t := dieOnErr (epollPwait2Vals s.epoll s.events to []) t
      in handleEvs vs t
 
   -- appends the currently ceded task (if any) to the work queue,
@@ -211,14 +214,12 @@ parameters (s : EpollST)
     case read1 s.alive t of
       Stop # t => () # t
       Run  # t => case cpoll of
-        0   => let n # t := poll 0 t in loop n t
+        0   => let n # t := poll 0.s t in loop n t
         S k =>
-         let _ # t := runDueTimers s.timer t
+         let r # t := runDueTimers s.timer t
           in case next t of
                Just tsk # t => let _ # t := tsk.act t in loop k t
-               Nothing  # t =>
-                let n # t := poll 1 t
-                 in loop n t
+               Nothing  # t => let n # t := poll (pollDuration r) t in loop n t
 
 release : EpollST -> IO ()
 release s = do
