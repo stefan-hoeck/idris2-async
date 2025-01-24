@@ -1,7 +1,8 @@
 module Profile.Timer
 
-import System.Clock
 import Opts
+import Profile.Util
+import System.Clock
 
 %default total
 
@@ -15,28 +16,10 @@ usage =
   overhead taken for generating and tearing down the timers.
   """
 
-pretty : Integer -> String
-pretty n = "\{secs}\{msecs}\{usecs}"
-  where
-    secs, msecs, usecs : String
-    secs =
-      case n `div` 1_000_000_000 of
-        0 => ""
-        s => "\{show s} s "
-
-    msecs =
-      case n `div` 1_000_000 of
-        0 => ""
-        s => "\{show $ s `mod` 1000} ms "
-
-    usecs =
-      case n `div` 1_000 of
-        s => "\{show $ s `mod` 1000} us"
-
 parameters {auto has : Has Errno es}
   
   measure : (ns : Integer) -> Clock Duration -> Nat -> Nat -> Prog es ()
-  measure ns cl c 0     = stdoutLn (pretty $ ns `div` cast c)
+  measure ns cl c 0     = stdoutLn (prettyNS $ ns `div` cast c)
   measure ns cl c (S k) = do
     dur <- delta (sleep cl)
     measure (ns + toNano dur) cl c k

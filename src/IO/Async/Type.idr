@@ -405,6 +405,11 @@ parameters {auto tg : TokenGen}
         Abort  :: tl => finalize fbr Canceled t
         []          => finalize fbr (toOutcome x) t
 
+      Start x     =>
+        let fbr2 # t := newFiber el t
+            _    # t := spawnFib el fbr2 x t
+         in run el (pure $ toFiber fbr2) cm cc fbr st t
+
       Sync x      =>
         let r # t := ioToF1 x t
          in run el (Term r) cm cc fbr st t
@@ -422,11 +427,6 @@ parameters {auto tg : TokenGen}
          in run el (pure ev) cm cc fbr st t
 
       Cede        => cedeFbr el fbr (run el (pure ()) cm cc fbr st) t
-
-      Start x     =>
-        let fbr2 # t := newFiber el t
-            _    # t := spawnFib el fbr2 x t
-         in run el (pure $ toFiber fbr2) cm cc fbr st t
 
       Asnc f =>
         let res  # t := refIO Nothing t
