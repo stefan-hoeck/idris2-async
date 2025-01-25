@@ -288,38 +288,27 @@ an event to occur. As such, we want to be able to run *a lot* such
 computations in parallel:
 
 ```idris
-logFiber : Integer -> Async e [Errno] ()
-logFiber n = when ((n `mod` 100) == 0) (stdoutLn "fiber \{show n} done")
+restFiber : TimerH e => Integer -> Async e [Errno] ()
+restFiber n = do
+  sleep 100.ms
+  when ((n `mod` 100) == 0) (stdoutLn "fiber \{show n} done")
 
 sleepMany : TimerH e => Nat -> Async e [Errno] ()
 sleepMany 0     = pure ()
-sleepMany (S k) =
-  ignore $ parTraverse (\n => sleep 100.ms >> logFiber n) [0 .. cast k]
+sleepMany (S k) = ignore $ parTraverse restFiber [0 .. cast k]
 ```
 
 You can try this by running the application like so:
 
 ```sh
 > pack run async-docs sleep 200
-fiber 1 done
+fiber 0 done
 ...
 ```
 
 You will note that even in case of many fibers running in parallel, the running
 time of the whole application only slightly increases due to the inner
 scheduling of fibers which is not completely free.
-
-Note: Since we use file descriptors for timers with the `epoll`-based event
-loop used to run these example applications, you might need to first increase
-the number of open file handles allowed before testing this with larger
-numbers of timers:
-
-```sh
-> ulimit -n 100000
-> pack run async-docs sleep 20000
-fiber 1 done
-...
-```
 
 ### But what about parallelism?
 
