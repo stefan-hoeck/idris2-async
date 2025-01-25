@@ -5,7 +5,10 @@ import Example.CH4.CopyWithHoles
 import Example.CH4.Seek
 
 import Profile.Bind
+import Profile.ChainedSpawn
 import Profile.ParTraverse
+import Profile.PingPong
+import Profile.Scheduling
 import Profile.Spawn
 import Profile.Timer
 
@@ -32,7 +35,10 @@ act = do
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
+    "profile-chained-spawn"   :: t => Profile.ChainedSpawn.prog t
     "profile-par-traverse"    :: t => Profile.ParTraverse.prog t
+    "profile-ping-pong"       :: t => Profile.PingPong.prog t
+    "profile-scheduling"      :: t => Profile.Scheduling.prog t
     "profile-spawn"           :: t => Profile.Spawn.prog t
     "profile-timer"           :: t => Profile.Timer.prog t
     _                              => stdoutLn usage

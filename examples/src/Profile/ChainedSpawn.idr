@@ -1,4 +1,4 @@
-module Profile.Spawn
+module Profile.ChainedSpawn
 
 import IO.Async.Deferred
 import Opts
@@ -10,24 +10,24 @@ import System.Clock
 usage : String
 usage =
   """
-  Usage: async-examples profile-spawn FIBERS 
+  Usage: async-examples profile-chained-spawn FIBERS 
 
-  Spawns `FIBERS` number of fibers and runs them asynchronously
+  Sequentially spawns `FIBERS` number of fibers and runs them asynchronously
   printing the average time spent per fiber. This is a microbenchmark
-  for testing the cost of spawning and running fibers in parallel.
+  for testing the cost of spawning and running fibers sequentially.
   """
 
 parameters {auto has : Has Errno es}
-  effect : IORef Nat -> Deferred () -> Prog es ()
-  effect ref def = do
-    b <- runIO (casupdate1 ref (\x => (pred x, x==1)))
-    when b (put def ())
+  iterate : Deferred () -> Nat -> Prog es ()
+  iterate def 0     = put def ()
+  iterate def (S k) = do
+    pure ()
+    ignore $ start (iterate def k)
 
   spawn : Nat -> Prog es ()
   spawn n = do
     def <- deferredOf ()
-    ref <- newIORef n
-    repeat n (start $ effect ref def)
+    _   <- start $ iterate def n
     await def
 
   measure : Nat -> Prog es ()
@@ -42,4 +42,3 @@ parameters {auto has : Has Errno es}
     iters <- readOptIO ONat i
     measure iters
   prog _ = throw (WrongArgs usage)
-
