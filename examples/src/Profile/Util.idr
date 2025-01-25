@@ -1,6 +1,13 @@
 module Profile.Util
 
+import Opts
+
 %default total
+
+export
+repeat : Nat -> Prog es a -> Prog es ()
+repeat 0     act = pure ()
+repeat (S n) act = ignore act >> repeat n act
 
 export
 prettyNS : Integer -> String

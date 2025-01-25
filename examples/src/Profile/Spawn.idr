@@ -23,10 +23,6 @@ parameters {auto has : Has Errno es}
     b <- runIO (casupdate1 ref (\x => (pred x, x==1)))
     when b (put def ())
 
-  repeat : Nat -> Prog es a -> Prog es ()
-  repeat 0     act = pure ()
-  repeat (S n) act = ignore act >> repeat n act
-
   spawn : Nat -> Prog es ()
   spawn n = do
     def <- deferredOf ()
