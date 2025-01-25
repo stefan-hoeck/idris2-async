@@ -13,6 +13,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
 import public IO.Async
@@ -97,6 +98,9 @@ record EpollST where
   ||| at the same time
   stealers : IORef Nat
 
+  ||| State for schedule actions
+  timer : Timer
+
 public export
 0 Task : Type
 Task = Package EpollST
@@ -116,7 +120,8 @@ workST me maxFiles queues stealers =
         handles # t := arrayIO maxFiles hdummy t
         events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
         epoll   # t := dieOnErr (epollCreate 0) t
-     in W n me alive ceded queues maxFiles handles events epoll stealers # t
+        tim     # t := TimerST.timer t
+     in W n me alive ceded queues maxFiles handles events epoll stealers tim # t
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -129,6 +134,9 @@ nextFin (FS x) = weaken x
 %inline
 elog : String -> IO1 ()
 elog s = (() #) -- toF1 (File.Prim.stdoutLn s)
+
+pollDuration : Integer -> Clock Duration
+pollDuration n = (cast $ min n 1_000_000).ns -- at most one milli second
 
 parameters (s : EpollST)
 
@@ -152,9 +160,9 @@ parameters (s : EpollST)
   --
   -- If we go to sleep, `timeout` will be set to 1 ms.
   %inline
-  poll : Int32 -> IO1 Nat
-  poll timeout t =
-    let vs # t := dieOnErr (epollWaitVals s.epoll s.events timeout) t
+  poll : (timeout : Clock Duration) -> IO1 Nat
+  poll to t =
+    let vs # t := dieOnErr (epollPwait2Vals s.epoll s.events to []) t
      in handleEvs vs t
 
   -- appends the currently ceded task (if any) to the work queue,
@@ -206,12 +214,12 @@ parameters (s : EpollST)
     case read1 s.alive t of
       Stop # t => () # t
       Run  # t => case cpoll of
-        0   => let n # t := poll 0 t in loop n t
-        S k => case next t of
-          Just tsk # t => let _ # t := tsk.act t in loop k t
-          Nothing  # t =>
-            let n # t := poll 1 t
-             in loop n t
+        0   => let n # t := poll 0.s t in loop n t
+        S k =>
+         let r # t := runDueTimers s.timer t
+          in case next t of
+               Just tsk # t => let _ # t := tsk.act t in loop k t
+               Nothing  # t => let n # t := poll (pollDuration r) t in loop n t
 
 release : EpollST -> IO ()
 release s = do
@@ -311,6 +319,10 @@ parameters (s         : EpollST)
 export %inline
 Epoll EpollST where
   primEpoll = pollFile
+
+export %inline
+TimerH EpollST where
+  primWait s dur f = schedule s.timer dur (f (Right ()))
 
 --------------------------------------------------------------------------------
 -- ThreadPool
