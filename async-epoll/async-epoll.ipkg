@@ -8,5 +8,6 @@ depends = async
 
 modules = IO.Async.Epoll
         , IO.Async.Loop.Epoll
+        , IO.Async.Loop.Poller
 
 sourcedir = "src"

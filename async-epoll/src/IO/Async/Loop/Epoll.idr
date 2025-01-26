@@ -9,10 +9,10 @@ import Data.Linear.Traverse1
 import Data.Queue
 import Data.Vect
 
-import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import IO.Async.Loop.Poller
 import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
@@ -23,7 +23,6 @@ import public IO.Async.Loop.TimerH
 import public IO.Async.Loop.SignalH
 
 import System
-import System.Linux.Epoll.Prim
 import System.Linux.Signalfd.Prim
 import System.Linux.Timerfd.Prim
 import System.Posix.Errno.IO
@@ -31,23 +30,6 @@ import System.Posix.File.Prim
 import System.Posix.Limits
 
 %default total
-
---------------------------------------------------------------------------------
--- Utilities
---------------------------------------------------------------------------------
-
-dieOnErr : EPrim a -> IO1 a
-dieOnErr act t =
-  case act t of
-    R r t => r # t
-    E x t => ioToF1 (die "Error: \{errorText x} (\{errorName x})") t
-
-public export
-0 FileHandle : Type
-FileHandle = Event -> IO1 ()
-
-hdummy : FileHandle
-hdummy = \_ => dummy
 
 --------------------------------------------------------------------------------
 -- EpollST
@@ -78,20 +60,8 @@ record EpollST where
   ||| Work queues of all worker threads
   queues   : IOArray size (Queue $ Package EpollST)
 
-  ||| Maximum number of files that can be opened (based
-  ||| on reading the corresponding system limit at
-  ||| startup)
-  maxFiles : Nat
-
-  ||| File event handles. This are invoked after receiving
-  ||| events from `epoll`
-  handles  : IOArray maxFiles FileHandle
-
-  ||| C array used to store file events during polling.
-  events   : CArrayIO maxFiles SEpollEvent
-
   ||| The `epoll` file descriptor used for polling
-  epoll    : Epollfd
+  poller   : Poller
 
   ||| Remaining number of stealers. To reduce contention,
   ||| not all idle workers will be allowed to steal work
@@ -117,11 +87,9 @@ workST me maxFiles queues stealers =
   runIO $ \t =>
     let alive   # t := refIO Run t
         ceded   # t := refIO Nothing t
-        handles # t := arrayIO maxFiles hdummy t
-        events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
-        epoll   # t := dieOnErr (epollCreate 0) t
+        poll    # t := Poller.poller maxFiles t
         tim     # t := TimerST.timer t
-     in W n me alive ceded queues maxFiles handles events epoll stealers tim # t
+     in W n me alive ceded queues poll stealers tim # t
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -131,39 +99,11 @@ nextFin : {n : _} -> Fin n -> Fin n
 nextFin FZ     = last
 nextFin (FS x) = weaken x
 
-%inline
-elog : String -> IO1 ()
-elog s = (() #) -- toF1 (File.Prim.stdoutLn s)
-
 pollDuration : Integer -> Clock Duration
+pollDuration 0 = 1.ms
 pollDuration n = (cast $ min n 1_000_000).ns -- at most one milli second
 
 parameters (s : EpollST)
-
-  %inline
-  getHandle : Fd -> IO1 FileHandle
-  getHandle f t =
-    case tryNatToFin (cast f.fd) of
-      Just v  => AC.get s.handles v t
-      Nothing => hdummy # t
-
-  handleEvs : List EpollEvent -> IO1 Nat
-  handleEvs []            t = POLL_ITER # t
-  handleEvs (E ev fd::es) t =
-    let h # t := getHandle fd t
-        _ # t := h ev t
-     in  handleEvs es t
-
-  -- Uses `epoll` to poll for file events. As long as we have
-  -- other work to do, `timeout` will be 0, and this funtion will only
-  -- be invoked after every `POLL_ITER` iteration of the work loop.
-  --
-  -- If we go to sleep, `timeout` will be set to 1 ms.
-  %inline
-  poll : (timeout : Clock Duration) -> IO1 Nat
-  poll to t =
-    let vs # t := dieOnErr (epollPwait2Vals s.epoll s.events to []) t
-     in handleEvs vs t
 
   -- appends the currently ceded task (if any) to the work queue,
   -- because we have other work to do
@@ -214,111 +154,27 @@ parameters (s : EpollST)
     case read1 s.alive t of
       Stop # t => () # t
       Run  # t => case cpoll of
-        0   => let n # t := poll 0.s t in loop n t
+        0   => let _ # t := poll s.poller t in loop POLL_ITER t
         S k =>
          let r # t := runDueTimers s.timer t
           in case next t of
                Just tsk # t => let _ # t := tsk.act t in loop k t
-               Nothing  # t => let n # t := poll (pollDuration r) t in loop n t
+               Nothing  # t =>
+                 let _ # t := pollWait s.poller (pollDuration r) t
+                  in loop POLL_ITER t
 
 release : EpollST -> IO ()
 release s = do
-  free s.events
-  fromPrim (close' s.epoll)
+  free s.poller.events
+  fromPrim (close' s.poller.epoll)
 
 --------------------------------------------------------------------------------
 -- Interfaces
 --------------------------------------------------------------------------------
 
-parameters (s         : EpollST)
-           (fd        : Fd)
-           (ev        : Event)
-           (autoClose : Bool)
-           (cb        : Either Errno Event -> IO1 ())
-
-  -- calls `epoll_ctl` via the FFI to handle the file descriptor
-  %inline
-  ctl  : EpollOp -> EPrim ()
-  ctl op = epollCtl s.epoll op fd ev
-
-  -- close the file descriptor if `autoClose` is set to `True`
-  -- this must be done *after* invoking `cb`.
-  %inline
-  closefd : IO1 ()
-  closefd = when1 autoClose (toF1 $ close' fd)
-
-  -- resets the file handle to `hdummy` and removes `fd` from the epoll set
-  %inline
-  cleanup : Fin s.maxFiles -> IO1 ()
-  cleanup v t =
-    let _ # t := AC.set s.handles v hdummy t
-     in io1 (ctl Del) t
-
-  -- invokes `cleanup` before running the file handle, and closes
-  -- the file descriptor in case `autoClose` is set to `True`.
-  %inline
-  act : Fin s.maxFiles -> FileHandle
-  act v e t =
-    let _ # t := Epoll.cleanup v t
-        _ # t := cb (Right e) t
-     in closefd t
-
-  -- we got a result before the file handle was registered.
-  -- we invoke the callback and close the file returning a
-  -- dummy cleanup hook
-  %inline
-  abrt : Either Errno Event -> IO1 (IO1 ())
-  abrt res t =
-    let _ # t := cb res t
-        _ # t := closefd t
-     in dummy # t
-
-  -- cancelation hook: like `act` but without invoking the callback
-  %inline
-  cncl : Fin s.maxFiles -> FileHandle
-  cncl v e t =
-    let _ # t := Epoll.cleanup v t
-     in closefd t
-
-  pollFile : IO1 (IO1 ())
-  pollFile t =
-    -- tries to convert the file descriptor to an index into the array
-    -- of file descriptors
-    case tryNatToFin (cast fd.fd) of
-      -- now trying to register the file descriptor at epoll
-      Just v  => case ctl Add t of
-        -- oops, this failed
-        E x t => case x == EPERM of
-          -- not a pollable file descriptor. we just invoke the callback with the
-          -- given `Event`. this allows us to use the event loop even with
-          -- regular files, giving us a single interface for asynchronous
-          -- reading and writing of files
-          True  => abrt (Right ev) t
-
-          -- there was another event. pass it to the callback
-          False => abrt (Left x) t
-
-        -- success! We now register an event handler to be invoked
-        -- once an epoll event is ready. care must be taken to only cleanup
-        -- stuff once, lest we cleanup a new file descriptor while this one
-        -- has been closed in the meantime
-        R _ t   =>
-         let -- atomic boolean flag indicating if the handle is still active
-             -- this will be atomically set to `False` (using `once`)
-             -- before running or canceling the file handle
-             --
-             -- `cleanup` needs to be atomic because there is a race condition
-             -- between running the file handle once an event is ready and
-             -- cancelation, which might happen externally and from a different
-             -- thread
-             r # t := refIO True t
-             _ # t := AC.set s.handles v (\e => once r (act v e)) t
-          in once r (cleanup v) # t
-      Nothing => abrt (Left EINVAL) t
-
 export %inline
 Epoll EpollST where
-  primEpoll = pollFile
+  primEpoll s = pollFile s.poller
 
 export %inline
 TimerH EpollST where
