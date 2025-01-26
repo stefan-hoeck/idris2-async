@@ -179,10 +179,11 @@ racePair :
      Async e es a
   -> Async e fs b
   -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
-racePair x y = do
+racePair x y =
+  uncancelable $ \poll => do
     f1 <- start x
     f2 <- start y
-    flip onCancel (cancel f1 >> cancel f2) $ primAsync $ \cb,t =>
+    flip onCancel (cancel f1 >> cancel f2) $ poll $ primAsync $ \cb,t =>
       let c1 # t := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) t
           c2 # t := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) t
        in (\t => let _ # t := c1 t in c2 t) # t
@@ -291,7 +292,7 @@ race xs  =
   uncancelable $ \poll => do
     def <- deferredOf (Outcome es a)
     fs  <- traverse (\f => start $ guaranteeCase f (put def)) xs
-    flip guarantee (traverse_ cancel fs) $ await def >>= \case
+    flip guarantee (traverse_ cancel fs) $ poll (await def) >>= \case
       Succeeded res => pure (Just res)
       Error err     => fail err
       Canceled      => pure Nothing
