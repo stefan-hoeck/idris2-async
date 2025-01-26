@@ -1,9 +1,12 @@
 module Main
 
+import Data.String
+
 import Example.CH4.Copy
 import Example.CH4.CopyWithHoles
 import Example.CH4.Seek
 
+import Profile.Alloc
 import Profile.Bind
 import Profile.ChainedSpawn
 import Profile.ParTraverse
@@ -34,6 +37,7 @@ act = do
     "copy"                    :: t => Copy.prog t
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
+    "profile-alloc"           :: t => Profile.Alloc.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
     "profile-chained-spawn"   :: t => Profile.ChainedSpawn.prog t
     "profile-par-traverse"    :: t => Profile.ParTraverse.prog t
@@ -43,13 +47,21 @@ act = do
     "profile-timer"           :: t => Profile.Timer.prog t
     _                              => stdoutLn usage
 
+isProfiling : List String -> Bool
+isProfiling (h::_) = "profile" `isPrefixOf` h
+isProfiling []     = False
+
 covering
 main : IO ()
 main = do
-  simpleApp $ handle handlers act
+  _::t <- getArgs | _ => die "Invalid arguments"
+  case isProfiling t of
+    False => simpleApp $ handle handlers act
+    True  => do
+      n <- asyncThreads
+      app n [] (handle handlers act)
   exitSuccess
 
   where
     handlers : All (Handler () EpollST) [Errno,ArgErr]
     handlers = [prettyOut,prettyOut]
-
