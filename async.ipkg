@@ -23,6 +23,7 @@ modules = IO.Async
 
         , IO.Async.Loop
         , IO.Async.Loop.SignalH
+        , IO.Async.Loop.SignalST
         , IO.Async.Loop.Sync
         , IO.Async.Loop.ThreadPool
         , IO.Async.Loop.TimerH
