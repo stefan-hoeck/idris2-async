@@ -1,8 +1,10 @@
 module IO.Async.Outcome
 
+import Derive.Prelude
 import public Data.List.Quantifiers.Extra
 
 %default total
+%language ElabReflection
 
 ||| Alias for `Either (HSum es) a`: A computation that either
 ||| succeeds with a result of type `a` or fails with an error
@@ -19,6 +21,19 @@ data Outcome : List Type -> Type -> Type where
   Succeeded : (res : a) -> Outcome es a
   Error     : (err : HSum es) -> Outcome es a
   Canceled  : Outcome es a
+
+export
+All Eq es => Eq a => Eq (Outcome es a) where
+  Succeeded x == Succeeded y = x == y
+  Error x     == Error y     = x == y
+  Canceled    == Canceled    = True
+  _           == _           = False
+
+export
+All Show es => Show a => Show (Outcome es a) where
+  showPrec p (Succeeded x) = showCon p "Succeeded" (showArg x)
+  showPrec p (Error x)     = showCon p "Error" (showArg x)
+  showPrec p Canceled      = "Canceled"
 
 export
 toOutcome : Result es a -> Outcome es a
