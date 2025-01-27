@@ -13,6 +13,7 @@ import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
 import IO.Async.Loop.Poller
+import IO.Async.Loop.SignalST
 import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
@@ -71,6 +72,9 @@ record EpollST where
   ||| State for schedule actions
   timer : Timer
 
+  ||| State for the signal handler
+  signals : Sighandler
+
 public export
 0 Task : Type
 Task = Package EpollST
@@ -85,11 +89,12 @@ workST :
   -> IO EpollST
 workST me maxFiles queues stealers =
   runIO $ \t =>
-    let alive   # t := refIO Run t
-        ceded   # t := refIO Nothing t
-        poll    # t := Poller.poller maxFiles t
-        tim     # t := TimerST.timer t
-     in W n me alive ceded queues poll stealers tim # t
+    let alive # t := refIO Run t
+        ceded # t := refIO Nothing t
+        poll  # t := Poller.poller maxFiles t
+        tim   # t := TimerST.timer t
+        sigh  # t := sighandler t
+     in W n me alive ceded queues poll stealers tim sigh # t
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -154,13 +159,17 @@ parameters (s : EpollST)
     case read1 s.alive t of
       Stop # t => () # t
       Run  # t => case cpoll of
-        0   => let _ # t := poll s.poller t in loop POLL_ITER t
+        0   =>
+          let _ # t := poll s.poller t
+              _ # t := checkSignals s.signals t
+           in loop POLL_ITER t
         S k =>
          let r # t := runDueTimers s.timer t
           in case next t of
                Just tsk # t => let _ # t := tsk.act t in loop k t
                Nothing  # t =>
-                 let _ # t := pollWait s.poller (pollDuration r) t
+                 let _ # t := checkSignals s.signals t
+                     _ # t := pollWait s.poller (pollDuration r) t
                   in loop POLL_ITER t
 
 release : EpollST -> IO ()
@@ -179,6 +188,10 @@ Epoll EpollST where
 export %inline
 TimerH EpollST where
   primWait s dur f = schedule s.timer dur (f (Right ()))
+
+export %inline
+SignalH EpollST where
+  primOnSignals s sigs f = await s.signals sigs (f . Right)
 
 --------------------------------------------------------------------------------
 -- ThreadPool

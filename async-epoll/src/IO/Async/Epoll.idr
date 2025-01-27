@@ -3,8 +3,6 @@ module IO.Async.Epoll
 import IO.Async.Internal.Loop
 import IO.Async.Loop.SignalH
 import IO.Async.Loop.TimerH
-import System.Linux.Signalfd.Prim
-import System.Linux.Timerfd.Prim
 import System.Posix.File.Prim
 
 import public IO.Async
@@ -138,44 +136,3 @@ parameters {auto has : Has Errno es}
         v <- runIO (fromPtr cp2)
         act v
         streamp r cp act
-
---------------------------------------------------------------------------------
--- Implementations
---------------------------------------------------------------------------------
-
-%inline
-succ : (Either Errno a -> IO1 ()) -> a -> IO1 (IO1 ())
-succ act x t = let _ # t := act (Right x) t in dummy # t
-
-%inline
-fail : (Either Errno a -> IO1 ()) -> Errno -> IO1 (IO1 ())
-fail act x t = let _ # t := act (Left x) t in dummy # t
-
-
-%inline
-failClose :
-     {auto fd : FileDesc b}
-  -> b
-  -> (Either Errno a -> IO1 ())
-  -> Errno
-  -> IO1 (IO1 ())
-failClose vb act x t =
-  let _ # t := toF1 (close' vb) t
-      _ # t := act (Left x) t
-   in dummy # t
-
-hsig : Signalfd -> (Either Errno Siginfo -> IO1 ()) -> Either Errno Event -> IO1 ()
-hsig fd act (Left x)   t = act (Left x) t
-hsig fd act (Right ev) t =
-  case hasEvent ev EPOLLIN of
-    False => act (Left EINVAL) t
-    True  => case readSignalfd fd 1 t of
-      E x    t => act (Left x) t
-      R [si] t => act (Right si) t
-      R _    t => act (Left EINVAL) t
-
-export
-Epoll e => SignalH e where
-  primOnSignals s sigs f t =
-    let R fd t := signalfd sigs 0 t | E x t => fail f x t
-     in primEpoll s (cast fd) (EPOLLIN <+> EPOLLET) True (hsig fd f) t
