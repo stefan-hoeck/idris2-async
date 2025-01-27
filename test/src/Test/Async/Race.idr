@@ -1,5 +1,7 @@
 module Test.Async.Race
 
+import System.Posix.Errno
+import IO.Async.Outcome
 import Derive.Prelude
 import Test.Async.Spec
 
@@ -7,59 +9,90 @@ import Test.Async.Spec
 %default total
 
 data Event : Type where
-  Outer    : Event
-  Tick     : Event
-  Tock     : Event
-  Tack     : Event
-  Canceled : Event
+  Outer    : Nat -> Event
+  Tick     : Nat -> Event
+  Tock     : Nat -> Event
+  Tack     : Nat -> Event
+  Canceled : Nat -> Event
+  None     : Event
+  RNat     : Nat -> Event
+  RErr     : Errno -> Event
 
 %runElab derive "Event" [Show,Eq]
 
-parameters {auto ref : IORef (SnocList (Nat,Event))}
+toEvent : Outcome [Errno] (Maybe $ Either Nat Nat) -> Event
+toEvent (Succeeded Nothing)          = None
+toEvent (Succeeded (Just (Left x)))  = RNat x
+toEvent (Succeeded (Just (Right x))) = RNat x
+toEvent (Error $ Here x)             = RErr x
+toEvent Canceled                     = None
 
-  fire : Nat -> Event -> Async e es ()
-  fire n e = runIO (mod1 ref (:< (n,e))) >> cede
+parameters {auto ref : IORef (SnocList Event)}
+
+  fire : Event -> Async e es ()
+  fire e = runIO (mod1 ref (:< e)) >> cede
 
   tick : Nat -> Async e es ()
-  tick n = fire n Tick
+  tick = fire . Tick
 
   tock : Nat -> Async e es ()
-  tock n = fire n Tock
+  tock = fire . Tock
 
   tack : Nat -> Async e es ()
-  tack n = fire n Tack
+  tack = fire . Tack
 
   onCncl : Nat -> Async e es a -> Async e es a
-  onCncl n v = onCancel v (fire n Canceled)
+  onCncl n v = onCancel v (fire $ Canceled n)
 
-  events : Nat -> List Event -> Async e es ()
-  events k []        = pure ()
-  events k (x :: xs) = fire k x >> events k xs
+  events : Nat -> List (Nat -> Event) -> Async e es Nat
+  events k []        = pure k
+  events k (x :: xs) =
+    case x k of
+      Canceled _ => canceled $> k
+      _          => fire (x k) >> events k xs
 
-  rce : List Event -> List Event -> Async e es ()
+  rce :
+       List (Nat -> Event)
+    -> List (Nat -> Event)
+    -> Async e [Errno] (Maybe $ Either Nat Nat)
   rce xs ys =
-    ignore $ race2
+    race2
       (onCncl 1 $ events 1 xs)
       (onCncl 2 $ events 2 ys)
 
-run : (IORef (SnocList (Nat,Event)) => Async e es ()) -> Async e es (List (Nat,Event))
+run :
+     (IORef (SnocList Event) => Async e [Errno] (Maybe $ Either Nat Nat))
+  -> Async e es (List Event)
 run f = do
   ref <- newIORef [<]
   fbr <- start (f @{ref})
-  ignore $ join fbr
+  out <- join fbr
+  runIO (mod1 ref (:< toEvent out))
   map (<>> []) (runIO (read1 ref))
 
 -- Note: The fiber that loses the race will fire one more event
--- before being canceled, because the main fiber will awoken
+-- before being canceled, because the main fiber will be awoken
 -- and appended to the event queue *after* the winning fiber
 -- finished.
 covering
 instrs : List FlatSpecInstr
 instrs =
   [ "a race" `should` "cancel the second fiber after the first is done" `at`
-      (assert (run $ rce [Tick] [Tick,Tack,Tock]) [(1,Tick),(2,Tick),(2,Tack),(2,Canceled)])
+      (assert
+        (run $ rce [Tick] [Tick,Tack,Tock])
+        [Tick 1,Tick 2,Tack 2,Canceled 2, RNat 1])
   , it `should` "cancel the first fiber after the second is done" `at`
-      (assert (run $ rce [Tick,Tack,Tock,Tick] [Tick]) [(1,Tick),(2,Tick),(1,Tack),(1,Tock),(1,Canceled)])
+      (assert
+        (run $ rce [Tick,Tack,Tock,Tick] [Tick])
+        [Tick 1,Tick 2,Tack 1,Tock 1,Canceled 1, RNat 2])
+  , it `should` "return the result of the second fiber right after the first was canceled" `at`
+      (assert
+        (run $ rce [Tick,Tack,Canceled] [Tick,Tack])
+        [Tick 1, Tick 2, Tack 1, Tack 2, Canceled 1, RNat 2])
+  , it `should` "return the result of the first fiber right after the second was canceled" `at`
+      (assert
+        (run $ rce [Tick,Tack] [Tick,Canceled])
+        [Tick 1, Tick 2, Tack 1, Canceled 2, RNat 1])
   ]
 
 export covering
