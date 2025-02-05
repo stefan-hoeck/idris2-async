@@ -12,8 +12,8 @@ depends = base >= 0.7.0
 modules = IO.Async
         , IO.Async.BQueue
         , IO.Async.Deferred
-        , IO.Async.ErrorIO
         , IO.Async.File
+        , IO.Async.HErr
         , IO.Async.Outcome
         , IO.Async.Posix
         , IO.Async.Resource

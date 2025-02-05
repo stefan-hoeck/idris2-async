@@ -6,7 +6,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
-import public IO.Async.ErrorIO
+import public IO.Async.HErr
 import public IO.Async.Outcome
 
 %default total
@@ -126,7 +126,7 @@ env = Env
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
 export %inline
-ErrorIO (Async e) where
+HErr (Async e) where
   fromResult = Term
   bindResult = Bind
 
