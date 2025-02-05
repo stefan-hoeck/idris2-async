@@ -6,6 +6,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import public IO.Async.HErr
 import public IO.Async.Outcome
 
 %default total
@@ -124,29 +125,10 @@ env = Env
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
-
-||| Lifts a value into `Async`.
 export %inline
-succeed : a -> Async e es a
-succeed = terminal . Right
-
-||| Lifts an error `Result` into `Async`.
-export %inline
-fail : HSum es -> Async e es a
-fail = terminal . Left
-
-export %inline
-Functor (Async e es) where
-  map f x = bind x $ terminal . map f
-
-export %inline
-Applicative (Async e es) where
-  pure = succeed
-  fa <*> ma = bind fa $ either fail (<$> ma)
-
-export %inline
-Monad (Async e es) where
-  x >>= f = bind x (either fail f)
+HErr (Async e) where
+  fromResult = Term
+  bindResult = Bind
 
 export %inline
 HasIO (Async e es) where
