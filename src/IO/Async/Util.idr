@@ -24,51 +24,11 @@ public export
 0 Handler : Type -> Type -> Type -> Type
 Handler a e x = x -> Async e [] a
 
-||| Throws a single error by injecting it into the sum of possible errors.
-export %inline
-throw : Has x es => x -> Async e es a
-throw = fail . inject
-
-||| Inject an `Either e a` computation into an `Async` monad dealing
-||| with several possible errors.
-export
-injectEither : Has x es => Either x a -> Async e es a
-injectEither (Left v)  = throw v
-injectEither (Right v) = succeed v
-
 ||| Inject an `IO (Either e a)` computation into an `Async` monad dealing
 ||| with several possible errors.
 export
 injectIO : Has x es => IO (Either x a) -> Async e es a
 injectIO = sync . map (mapFst inject)
-
-export
-handleErrors : (HSum es -> Async e fs a) -> Async e es a -> Async e fs a
-handleErrors f x = bind x $ either f succeed
-
-export %inline
-mapErrors : (HSum es -> HSum fs) -> Async e es a -> Async e fs a
-mapErrors f = handleErrors (fail . f)
-
-export %inline
-weakenErrors : Async e [] a -> Async e fs a
-weakenErrors = believe_me -- for performance and cancelation reasons
-
-export %inline
-dropErrs : Async e es () -> Async e [] ()
-dropErrs = handleErrors (const $ succeed ())
-
-export %inline
-handle : All (Handler a e) es -> Async e es a -> Async e [] a
-handle hs = handleErrors (collapse' . hzipWith id hs)
-
-export %inline
-liftErrors : Async e es a -> Async e fs (Result es a)
-liftErrors = handleErrors (succeed . Left) . map Right
-
-export %inline
-liftError : Async e [e] a -> Async e fs (Either e a)
-liftError = handleErrors (pure . Left . project1) . map Right
 
 export
 embed : (onCancel : Lazy (Async e es a)) ->  Outcome es a -> Async e es a
