@@ -23,11 +23,14 @@ record Fiber (es : List Type) (a : Type) where
 
 export
 data Async : (e : Type) -> (es : List Type) -> Type -> Type where
-  -- Implements bind (`>>=`) and error handling
-  Bind   : Async e es a -> (Result es a -> Async e fs b) -> Async e fs b
+  -- Implements bind (`>>=`)
+  Bind   : Async e es a -> (a -> Async e es b) -> Async e es b
 
   -- A pure result (value or error)
-  Term   : Result es a -> Async e es a
+  Val    : a -> Async e es a
+
+  -- A pure result (value or error)
+  Err    : HSum es -> Async e es a
 
   -- A wrapped synchronous/blocking IO action
   Sync   : IO (Result es a) -> Async e es a
@@ -41,6 +44,8 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 
   -- Masks a fiber as uncanceble
   UC     : (Token -> Nat -> Async e es a) -> Async e es a
+
+  Attempt : Async e es a -> Async e fs (Result es a)
 
   -- Returns the context currently handling this fiber, giving us access
   -- to functionality specific to the running event loop.
@@ -71,7 +76,7 @@ Poll e = forall es,a . Async e es a -> Async e es a
 ||| Lifts a pure `Result` into `Async`.
 export %inline
 terminal : Result es a -> Async e es a
-terminal = Term
+terminal = either Err Val
 
 ||| Lifts an effectful `Result` into `Async`.
 export %inline
@@ -81,7 +86,7 @@ sync = Sync
 ||| Primitive for implementing `(>>=)` and error handling
 export %inline
 bind : Async e es a -> (Result es a -> Async e fs b) -> Async e fs b
-bind = Bind
+bind = Bind . Attempt
 
 ||| Makes sure the given cancelation hook is run when `act` is canceled.
 export %inline
@@ -125,30 +130,24 @@ env = Env
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
+
 export
 Functor (Async e es) where
-  map f v = Bind v (Term . map f)
+  map f v = Bind v (Val . f)
 
 export
 Applicative (Async e es) where
-  pure = Term . Right
-  ff <*> vv = Bind ff $ \case
-    Left  x => Term (Left x)
-    Right f => f <$> vv
+  pure      = Val
+  ff <*> vv = Bind ff (<$> vv)
 
 export
 Monad (Async e es) where
-  v >>= f = Bind v $ \case
-    Left x  => Term $ Left x
-    Right v => f v
+  (>>=) = Bind
 
 export %inline
 HErr (Async e) where
-  fail = Term . Left
-  handleErrors f act =
-    Bind act $ \case
-      Left x  => f x
-      Right v => pure v
+  fail    = Err
+  attempt = Attempt
 
 export %inline
 HasIO (Async e es) where
@@ -383,29 +382,45 @@ parameters {auto tg : TokenGen}
   runC el act cc fbr st t =
     case act of
       UC f   => run el (f fbr.token 1) 1 cc fbr (Dec::st) t
-      Term x => case st of
-        Bnd f :: tl  => case f x of
+      Val x => case st of
+        Bnd f :: tl  => case f (Right x) of
           UC g => run el (g fbr.token 1) 1 cc fbr (Dec::tl) t
           a    => run el (pure ()) 1 cc fbr (hooks st) t
-        Inc :: tl    => run el (Term x) 1 cc fbr tl t
+        Inc :: tl    => run el (Val x) 1 cc fbr tl t
+        _           => run el (pure ()) 1 cc fbr (hooks st) t
+      Err x => case st of
+        Bnd f :: tl  => case f (Left x) of
+          UC g => run el (g fbr.token 1) 1 cc fbr (Dec::tl) t
+          a    => run el (pure ()) 1 cc fbr (hooks st) t
+        Inc :: tl    => run el (Err x) 1 cc fbr tl t
         _           => run el (pure ()) 1 cc fbr (hooks st) t
       _    => run el (pure ()) 1 cc fbr (hooks st) t
 
   runR el act cm cc fbr st t =
     case act of
       Bind x f => case x of
-        Term x => run el (f x) cm cc fbr st t
-        _      => run el x cm cc fbr (Bnd f :: st) t
+        Val x => run el (f x) cm cc fbr st t
+        _     => run el x cm cc fbr (Bnd (either Err f) :: st) t
 
-      Term x      => case st of
-        Bnd f  :: tl => run el (f x) cm        cc fbr tl t
+      Val x      => case st of
+        Bnd f  :: tl => run el (f $ Right x) cm        cc fbr tl t
         Inc    :: tl => run el act   (S cm)    cc fbr tl t
         Dec    :: tl => run el act   (pred cm) cc fbr tl t
         -- ignore cancel hook because cancelation is currently not
         -- observable.
         Hook h :: tl => run el act   cm        cc fbr tl t
         Abort  :: tl => finalize fbr Canceled t
-        []          => finalize fbr (toOutcome x) t
+        []          => finalize fbr (Succeeded x) t
+
+      Err x      => case st of
+        Bnd f  :: tl => run el (f $ Left x) cm        cc fbr tl t
+        Inc    :: tl => run el act   (S cm)    cc fbr tl t
+        Dec    :: tl => run el act   (pred cm) cc fbr tl t
+        -- ignore cancel hook because cancelation is currently not
+        -- observable.
+        Hook h :: tl => run el act   cm        cc fbr tl t
+        Abort  :: tl => finalize fbr Canceled t
+        []          => finalize fbr (Error x) t
 
       Start x     =>
         let fbr2 # t := newFiber el t
@@ -414,7 +429,9 @@ parameters {auto tg : TokenGen}
 
       Sync x      =>
         let r # t := ioToF1 x t
-         in run el (Term r) cm cc fbr st t
+         in run el (terminal r) cm cc fbr st t
+
+      Attempt x => run el x cm cc fbr (Bnd Val :: st) t
 
       Cancel      => 
         let _ # t := doCancel fbr t
@@ -441,7 +458,7 @@ parameters {auto tg : TokenGen}
 
       Wait res     =>
         case read1 res t of
-          Just v  # t => run el (Term v) cm cc fbr st t
+          Just v  # t => run el (terminal v) cm cc fbr st t
           Nothing # t => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) t
 
   export covering

@@ -12,8 +12,8 @@ import System.Posix.Errno
 ||| error is wrapped in an `HSum`.
 public export
 interface Monad (m es) => HErr (0 m : List Type -> Type -> Type) where
-  fail         : HSum es -> m es a
-  handleErrors : (HSum es -> m fs a) -> m es a -> m fs a
+  fail    : HSum es -> m es a
+  attempt : m es a -> m fs (Result es a)
 
 ||| Lifts a value into `Async`.
 export %inline
@@ -39,6 +39,11 @@ export
 injectEither : HErr m => Has x es => Either x a -> m es a
 injectEither (Left v)  = throw v
 injectEither (Right v) = succeed v
+
+||| Handle possible errors with the given function
+export
+handleErrors : HErr m => (HSum es -> m fs a) -> m es a -> m fs a
+handleErrors f act = attempt act >>= either f pure
 
 export %inline
 mapErrors : HErr m => (HSum es -> HSum fs) -> m es a -> m fs a
@@ -74,16 +79,15 @@ injectIO act = liftIO act >>= either fail pure
 
 export
 HErr (Either . HSum) where
-  fail = Left
-  handleErrors f (Right v) = Right v
-  handleErrors f (Left x)  = f x
+  fail    = Left
+  attempt = Right
 
 export
 HErr Outcome where
   fail = Error
-  handleErrors f (Error x)     = f x
-  handleErrors f (Succeeded v) = Succeeded v
-  handleErrors f Canceled      = Canceled
+  attempt (Error x)     = Succeeded (Left x)
+  attempt (Succeeded v) = Succeeded (Right v)
+  attempt Canceled      = Canceled
 
 eoi : Has Errno es => EPrim a -> IO (Result es a)
 eoi act =
