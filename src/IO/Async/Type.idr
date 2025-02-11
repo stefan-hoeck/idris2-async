@@ -125,10 +125,30 @@ env = Env
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
+export
+Functor (Async e es) where
+  map f v = Bind v (Term . map f)
+
+export
+Applicative (Async e es) where
+  pure = Term . Right
+  ff <*> vv = Bind ff $ \case
+    Left  x => Term (Left x)
+    Right f => f <$> vv
+
+export
+Monad (Async e es) where
+  v >>= f = Bind v $ \case
+    Left x  => Term $ Left x
+    Right v => f v
+
 export %inline
 HErr (Async e) where
-  fromResult = Term
-  bindResult = Bind
+  fail = Term . Left
+  handleErrors f act =
+    Bind act $ \case
+      Left x  => f x
+      Right v => pure v
 
 export %inline
 HasIO (Async e es) where

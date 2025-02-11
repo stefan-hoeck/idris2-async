@@ -1,6 +1,8 @@
 module IO.Async.HErr
 
+import Data.Linear.Token
 import IO.Async.Outcome
+import System.Posix.Errno
 
 %default total
 
@@ -9,32 +11,18 @@ import IO.Async.Outcome
 ||| Possible errors are given as a `List Type` parameter, and a single
 ||| error is wrapped in an `HSum`.
 public export
-interface HErr (0 m : List Type -> Type -> Type) where
-  fromResult : Result es a -> m es a
-  bindResult : m es a -> (Result es a -> m fs b) -> m fs b
+interface Monad (m es) => HErr (0 m : List Type -> Type -> Type) where
+  fail         : HSum es -> m es a
+  handleErrors : (HSum es -> m fs a) -> m es a -> m fs a
 
 ||| Lifts a value into `Async`.
 export %inline
 succeed : HErr m => a -> m es a
-succeed = fromResult . Right
-
-||| Lifts an error `Result` into `Async`.
-export %inline
-fail : HErr m => HSum es -> m es a
-fail = fromResult . Left
+succeed = pure
 
 export %inline
-HErr m => Functor (m es) where
-  map f x = bindResult x $ fromResult . map f
-
-export %inline
-HErr m => Applicative (m es) where
-  pure = succeed
-  fa <*> ma = bindResult fa $ either fail (<$> ma)
-
-export %inline
-HErr m => Monad (m es) where
-  x >>= f = bindResult x (either fail f)
+fromResult : HErr m => Result es a -> m es a
+fromResult = either fail pure
 
 --------------------------------------------------------------------------------
 -- Error handling
@@ -51,10 +39,6 @@ export
 injectEither : HErr m => Has x es => Either x a -> m es a
 injectEither (Left v)  = throw v
 injectEither (Right v) = succeed v
-
-export
-handleErrors : HErr m => (HSum es -> m fs a) -> m es a -> m fs a
-handleErrors f x = bindResult x $ either f succeed
 
 export %inline
 mapErrors : HErr m => (HSum es -> HSum fs) -> m es a -> m fs a
@@ -79,3 +63,34 @@ liftError = handleErrors (pure . Left . project1) . map Right
 export %inline
 handle : HErr m => All (\e => e -> m [] a) es -> m es a -> m [] a
 handle hs = handleErrors (collapse' . hzipWith id hs)
+
+export
+injectIO : HErr m => HasIO (m es) => IO (Result es a) -> m es a
+injectIO act = liftIO act >>= either fail pure
+
+--------------------------------------------------------------------------------
+-- Implementations
+--------------------------------------------------------------------------------
+
+export
+HErr (Either . HSum) where
+  fail = Left
+  handleErrors f (Right v) = Right v
+  handleErrors f (Left x)  = f x
+
+export
+HErr Outcome where
+  fail = Error
+  handleErrors f (Error x)     = f x
+  handleErrors f (Succeeded v) = Succeeded v
+  handleErrors f Canceled      = Canceled
+
+eoi : Has Errno es => EPrim a -> IO (Result es a)
+eoi act =
+  runIO $ \t => case act t of
+      R r t => Right r # t
+      E x t => Left (inject x) # t
+
+export %inline
+HErr m => HasIO (m es) => Has Errno es => ErrIO (m es) where
+  eprim act = injectIO (eoi act)

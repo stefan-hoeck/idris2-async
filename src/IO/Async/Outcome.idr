@@ -74,3 +74,18 @@ Traversable (Outcome es) where
   traverse f (Succeeded v) = Succeeded <$> f v
   traverse _ (Error v)     = pure $ Error v
   traverse _ Canceled      = pure Canceled
+
+export
+Applicative (Outcome es) where
+  pure = Succeeded
+  Succeeded f <*> Succeeded v = Succeeded (f v)
+  Error err   <*> _           = Error err
+  Canceled    <*> _           =  Canceled
+  _           <*> Error err   = Error err
+  _           <*> Canceled    = Canceled
+
+export
+Monad (Outcome es) where
+  Succeeded v >>= f = f v
+  Error x     >>= _ = Error x
+  Canceled    >>= _ = Canceled

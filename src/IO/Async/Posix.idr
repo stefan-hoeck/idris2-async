@@ -14,13 +14,6 @@ import System.Posix.File
 --------------------------------------------------------------------------------
 
 export %inline
-Has Errno es => ErrIO (Async e es) where
-  eprim act =
-    sync $ runIO $ \t => case act t of
-      R r t => Right r # t
-      E x t => Left (inject x) # t
-
-export %inline
 Resource (CArrayIO n a) where
   cleanup = liftIO . free
 
