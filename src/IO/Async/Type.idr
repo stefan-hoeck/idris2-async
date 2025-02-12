@@ -6,7 +6,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
-import public IO.Async.HErr
+import public IO.Async.MCancel
 import public IO.Async.Outcome
 
 %default total
@@ -69,10 +69,6 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 -- Primitives
 --------------------------------------------------------------------------------
 
-public export
-0 Poll : Type -> Type
-Poll e = forall es,a . Async e es a -> Async e es a
-
 ||| Lifts a pure `Result` into `Async`.
 export %inline
 terminal : Result es a -> Async e es a
@@ -82,27 +78,6 @@ terminal = either Err Val
 export %inline
 sync : IO (Result es a) -> Async e es a
 sync = Sync
-
-||| Primitive for implementing `(>>=)` and error handling
-export %inline
-bind : Async e es a -> (Result es a -> Async e fs b) -> Async e fs b
-bind = Bind . Attempt
-
-||| Makes sure the given cancelation hook is run when `act` is canceled.
-export %inline
-onCancel : (act : Async e es a) -> (hook : Async e [] ()) -> Async e es a
-onCancel = OnCncl
-
-||| Gracefully cancels execution of the current fiber.
-export %inline
-canceled : Async e es ()
-canceled = Cancel
-
-||| Masks the given computation as *uncancelable* except for the regions
-||| unmasked with the given `Poll`.
-export %inline
-uncancelable : (Poll e -> Async e es a) -> Async e es a
-uncancelable f = UC $ \t,n => f (APoll t n)
 
 ||| Asynchronous FFI: Wraps a callback handler into `Async`.
 |||
@@ -145,13 +120,19 @@ Monad (Async e es) where
   (>>=) = Bind
 
 export %inline
-HErr (Async e) where
+MErr (Async e) where
   fail    = Err
   attempt = Attempt
 
 export %inline
 HasIO (Async e es) where
   liftIO = sync . map Right
+
+export %inline
+MCancel (Async e) where
+  onCancel = OnCncl
+  canceled = Cancel
+  uncancelable f = UC $ \t,n => f (APoll t n)
 
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)

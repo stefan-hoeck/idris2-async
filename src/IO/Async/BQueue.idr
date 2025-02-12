@@ -16,7 +16,7 @@ record ST a where
   offerers : Queue (a,Deferred ())
 
 %inline
-deq : Poll e -> Deferred a -> ST a -> (ST a, Async e es a)
+deq : Poll (Async e) -> Deferred a -> ST a -> (ST a, Async e es a)
 deq poll def (S cap q ts os) =
   case dequeue q of
     Just (n,q2) => case dequeue os of
@@ -27,7 +27,7 @@ deq poll def (S cap q ts os) =
       Just ((x,o), os2) => (S cap q ts os2, put o () $> x)
 
 %inline
-enq : Poll e -> Deferred () -> a -> ST a -> (ST a, Async e es ())
+enq : Poll (Async e) -> Deferred () -> a -> ST a -> (ST a, Async e es ())
 enq poll def n (S cap q ts os) =
   case dequeue ts of
     Just (def,ts2) => (S cap q ts2 os, put def n)
