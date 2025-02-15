@@ -21,14 +21,14 @@ once r act t =
     False # t => () # t
 
 export
-put : (r : Ref t (Maybe a)) -> a -> (0 p : Res r rs) => F1' rs
+put : Ref s (Maybe a) -> a -> F1' s
 put r v =
   casmod1 r $ \case
     Nothing => Just v
     Just w  => Just w
 
 export
-modify : (r : Ref t a) -> (a -> (a,b)) -> (0 p : Res r rs) => F1 rs b
+modify : Ref s a -> (a -> (a,b)) -> F1 s b
 modify r f t =
   let v1 # t := read1 r t
       (v2,res) := f v1

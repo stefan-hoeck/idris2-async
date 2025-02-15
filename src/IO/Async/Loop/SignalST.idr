@@ -55,7 +55,7 @@ record Sighandler where
 export
 sighandler : IO1 Sighandler
 sighandler t =
-  let st # t := refIO (SST 0 empty) t
+  let st # t := Ref1.ref (SST 0 empty) t
    in S st # t
 
 parameters (si : Sighandler)

@@ -89,8 +89,8 @@ workST :
   -> IO EpollST
 workST me maxFiles queues stealers =
   runIO $ \t =>
-    let alive # t := refIO Run t
-        ceded # t := refIO Nothing t
+    let alive # t := Ref1.ref Run t
+        ceded # t := Ref1.ref Nothing t
         poll  # t := Poller.poller maxFiles t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t

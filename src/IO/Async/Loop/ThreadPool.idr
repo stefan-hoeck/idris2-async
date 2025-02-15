@@ -58,8 +58,8 @@ workST :
   -> IO WorkST
 workST me queues =
   runIO $ \t =>
-    let empty # t := refIO True t
-        alive # t := refIO Run t
+    let empty # t := Ref1.ref True t
+        alive # t := Ref1.ref Run t
      in (W n me alive empty queues) # t
 
 next : {n : _} -> Fin n -> Fin n
