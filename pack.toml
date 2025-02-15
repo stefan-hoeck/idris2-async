@@ -22,41 +22,41 @@ ipkg = "async-examples.ipkg"
 [custom.all.ref1]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-ref1"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "ref1.ipkg"
 
 [custom.all.posix]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-linux"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "posix/posix.ipkg"
 
 [custom.all.linux]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-linux"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "linux/linux.ipkg"
 
 [custom.all.cptr]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-cptr"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "cptr.ipkg"
 
 [custom.all.array]
 type   = "github"
 url    = "https://github.com/stefan-hoeck/idris2-array"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "array.ipkg"
 
 [custom.all.bytestring]
 type   = "github"
 url    = "https://github.com/stefan-hoeck/idris2-bytestring"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "bytestring.ipkg"
 
 [custom.all.containers]
 type   = "git"
 url    = "https://github.com/idris-community/idris2-containers"
-commit = "latest:universal"
+commit = "latest:main"
 ipkg   = "containers.ipkg"
