@@ -36,3 +36,27 @@ type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-linux"
 commit = "latest:main"
 ipkg   = "linux/linux.ipkg"
+
+[custom.all.cptr]
+type   = "git"
+url    = "https://github.com/stefan-hoeck/idris2-cptr"
+commit = "latest:main"
+ipkg   = "cptr.ipkg"
+
+[custom.all.array]
+type   = "github"
+url    = "https://github.com/stefan-hoeck/idris2-array"
+commit = "latest:main"
+ipkg   = "array.ipkg"
+
+[custom.all.bytestring]
+type   = "github"
+url    = "https://github.com/stefan-hoeck/idris2-bytestring"
+commit = "latest:main"
+ipkg   = "bytestring.ipkg"
+
+[custom.all.containers]
+type   = "git"
+url    = "https://github.com/idris-community/idris2-containers"
+commit = "latest:main"
+ipkg   = "containers.ipkg"

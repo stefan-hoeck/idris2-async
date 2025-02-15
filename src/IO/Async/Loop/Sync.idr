@@ -41,7 +41,7 @@ TimerH SyncST where
   primWait s dur act t =
     let now # t := ioToF1 (clockTime Monotonic) t
         c       := addDuration now dur
-        ref # t := refIO False t
+        ref # t := Ref1.ref False t
         _   # t := mod1 s.timers (insertWith (++) c [T ref act]) t
      in write1 ref True # t
 
