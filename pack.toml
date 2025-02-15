@@ -54,3 +54,9 @@ type   = "github"
 url    = "https://github.com/stefan-hoeck/idris2-bytestring"
 commit = "latest:universal"
 ipkg   = "bytestring.ipkg"
+
+[custom.all.containers]
+type   = "git"
+url    = "https://github.com/idris-community/idris2-containers"
+commit = "latest:universal"
+ipkg   = "containers.ipkg"
