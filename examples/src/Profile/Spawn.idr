@@ -26,7 +26,7 @@ parameters {auto has : Has Errno es}
   spawn : Nat -> Prog es ()
   spawn n = do
     def <- deferredOf ()
-    ref <- newIORef n
+    ref <- newref n
     repeat n (start $ effect ref def)
     await def
 

@@ -57,7 +57,7 @@ record Timer where
 
 export
 timer : IO1 Timer
-timer t = let st # t := Ref1.ref (TST 0 empty) t in T st # t
+timer t = let st # t := ref1 (TST 0 empty) t in T st # t
 
 parameters (ti : Timer)
 

@@ -46,13 +46,13 @@ record BQueue a where
 
 ||| Creates a new bounded queue of the given capacity.
 export %inline
-bqueue : HasIO io => Nat -> io (BQueue a)
-bqueue cap = BQ <$> newIORef (S cap empty empty empty)
+bqueue : Lift1 World f => Nat -> f (BQueue a)
+bqueue cap = BQ <$> newref (S cap empty empty empty)
 
 ||| Utility alias for `bqueue` taking the type of stored values
 ||| as an explicit argument.
 export %inline
-bqueueOf : HasIO io => (0 a : Type) -> Nat -> io (BQueue a)
+bqueueOf : Lift1 World f => (0 a : Type) -> Nat -> f (BQueue a)
 bqueueOf _ = bqueue
 
 ||| Appends a value to a bounded queue potentially blocking the

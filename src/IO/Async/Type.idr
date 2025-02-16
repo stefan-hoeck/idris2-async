@@ -134,6 +134,10 @@ MCancel (Async e) where
   canceled = Cancel
   uncancelable f = UC $ \t,n => f (APoll t n)
 
+export %inline
+Lift1 World (Async e es) where
+  lift1 = runIO
+
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
@@ -184,8 +188,8 @@ record FiberImpl (e : Type) (es : List Type) (a : Type) where
 newFiber : TokenGen => EventLoop e -> IO1 (FiberImpl e es a)
 newFiber el t =
   let tok  # t := Token.token t
-      env  # t := Ref1.ref el.init t
-      st   # t := Ref1.ref (FS 0 [] False Running) t
+      env  # t := ref1 el.init t
+      st   # t := ref1 (FS 0 [] False Running) t
    in FI tok env st # t
 
 -- remove the observer identified by the given token from the
@@ -429,7 +433,7 @@ parameters {auto tg : TokenGen}
       Cede        => cedeFbr el fbr (run el (pure ()) cm cc fbr st) t
 
       Asnc f =>
-        let res  # t := Ref1.ref Nothing t
+        let res  # t := ref1 Nothing t
             cncl # t := f (\r,t => let _ # t := put res r t in resume fbr t) t
          in run el (Wait res) cm cc fbr (Hook (runIO cncl) :: st) t
 

@@ -89,8 +89,8 @@ workST :
   -> IO EpollST
 workST me maxFiles queues stealers =
   runIO $ \t =>
-    let alive # t := Ref1.ref Run t
-        ceded # t := Ref1.ref Nothing t
+    let alive # t := ref1 Run t
+        ceded # t := ref1 Nothing t
         poll  # t := Poller.poller maxFiles t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
@@ -245,9 +245,9 @@ mkThreadPool :
      (n : Subset Nat IsSucc)
   -> IO (ThreadPool, EventLoop EpollST)
 mkThreadPool (Element (S k) _) = do
-  qs <- newIOArray (S k) (Queue.empty {a = Package EpollST})
+  qs <- marray (S k) (Queue.empty {a = Package EpollST})
   let mfs := sysconf SC_OPEN_MAX
-  ss <- newIORef (half $ S k)
+  ss <- newref (half $ S k)
   ws <- workSTs (cast mfs) qs ss (S k)
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   let tp := TP k ts ws

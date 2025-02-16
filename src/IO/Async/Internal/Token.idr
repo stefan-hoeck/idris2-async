@@ -25,7 +25,7 @@ record TokenGen where
 
 export
 newTokenGen : IO TokenGen
-newTokenGen = [| TG (newIORef 0) |]
+newTokenGen = [| TG (newref 0) |]
 
 ||| Generates a new unique fiber token.
 export %inline

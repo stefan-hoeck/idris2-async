@@ -16,9 +16,9 @@ import System.Posix.Errno
 export covering
 runAsyncBlocking : Async SyncST es a -> IO (Outcome es a)
 runAsyncBlocking as = do
-  ref <- newIORef (the (Outcome es a) Canceled)
-  syncApp (dropErrs $ ignore $ guaranteeCase as (writeIORef ref))
-  readIORef ref
+  ref <- newref (the (Outcome es a) Canceled)
+  syncApp (dropErrs $ ignore $ guaranteeCase as (writeref ref))
+  readref ref
 
 export %inline
 failWith : Maybe Diff -> String -> Test

@@ -22,13 +22,13 @@ record Deferred a where
 
 ||| Creates a new, empty `Deferred`.
 export %inline
-deferred : HasIO io => io (Deferred a)
-deferred = D <$> newIORef Ini
+deferred : Lift1 World f => f (Deferred a)
+deferred = D <$> newref Ini
 
 ||| Convenience alias of `Deferred`, which takes the type of
 ||| the value stored as an explicit argument.
 export %inline
-deferredOf : HasIO io => (0 a : _) -> io (Deferred a)
+deferredOf : Lift1 World f => (0 a : _) -> f (Deferred a)
 deferredOf _ = deferred
 
 unobs : IORef (ST a) -> IO1 ()
@@ -39,9 +39,9 @@ unobs ref = casmod1 ref (const Ini)
 ||| The value is written if and only if no other values has
 ||| been set first. Any observers will be invoked immediately.
 export
-put : HasIO io => Deferred a -> (v : a) -> io ()
+put : Lift1 World f => Deferred a -> (v : a) -> f ()
 put (D ref) v =
-  runIO $ \t =>
+  lift1 $ \t =>
     let act # t := casupdate1 ref upd t
      in act t
 

@@ -41,7 +41,7 @@ TimerH SyncST where
   primWait s dur act t =
     let now # t := ioToF1 (clockTime Monotonic) t
         c       := addDuration now dur
-        ref # t := Ref1.ref False t
+        ref # t := ref1 False t
         _   # t := mod1 s.timers (insertWith (++) c [T ref act]) t
      in write1 ref True # t
 
@@ -120,5 +120,5 @@ spawnImpl pkg t =
 export covering
 sync : IO (EventLoop SyncST)
 sync = do
-  st <- [| SST (newIORef empty) (newIORef [<]) (newIORef False) |]
+  st <- [| SST (newref empty) (newref [<]) (newref False) |]
   pure (EL spawnImpl cedeImpl st)

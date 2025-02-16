@@ -58,8 +58,8 @@ workST :
   -> IO WorkST
 workST me queues =
   runIO $ \t =>
-    let empty # t := Ref1.ref True t
-        alive # t := Ref1.ref Run t
+    let empty # t := ref1 True t
+        alive # t := ref1 Run t
      in (W n me alive empty queues) # t
 
 next : {n : _} -> Fin n -> Fin n
@@ -141,7 +141,7 @@ mkThreadPool :
   -> {auto 0 p : IsSucc n}
   -> IO (EventLoop WorkST, IO ())
 mkThreadPool (S k) = do
-  qs <- newIOArray (S k) (Queue.empty {a = Package WorkST})
+  qs <- marray (S k) (Queue.empty {a = Package WorkST})
   ws <- workSTs qs (S k)
   ts <- traverse (\x => fork (runIO $ steal x x.me x.size)) ws
   let tp := TP k ts ws

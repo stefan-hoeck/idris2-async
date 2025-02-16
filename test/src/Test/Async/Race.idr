@@ -64,7 +64,7 @@ run :
      (IORef (SnocList Event) => Async e [Errno] (Maybe $ Either Nat Nat))
   -> Async e es (List Event)
 run f = do
-  ref <- newIORef [<]
+  ref <- newref [<]
   fbr <- start (f @{ref})
   out <- join fbr
   runIO (mod1 ref (:< toEvent out))
