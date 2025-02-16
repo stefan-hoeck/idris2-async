@@ -72,7 +72,7 @@ parameters {auto ref : IORef (SnocList Event)}
 
 run : (IORef (SnocList Event) => Async e es ()) -> Async e es (List Event)
 run f = do
-  ref <- newIORef [<]
+  ref <- newref [<]
   fbr <- start (f @{ref})
   ignore $ join fbr
   map (<>> []) (runIO (read1 ref))

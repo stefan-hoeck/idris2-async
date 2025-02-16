@@ -28,8 +28,8 @@ record Semaphore where
 
 ||| Creates a new semaphore with an internal counter of `n`.
 export %inline
-semaphore : HasIO io => (n : Nat) -> io Semaphore
-semaphore n = S <$> newIORef (Ini n)
+semaphore : Lift1 World f => (n : Nat) -> f Semaphore
+semaphore n = S <$> newref (Ini n)
 
 unobs : IORef ST -> IO1 ()
 unobs ref =

@@ -303,9 +303,9 @@ collect sx arr (S k) b t =
     Error x # t     => Error x # t
     Canceled # t    => collect sx arr k False t
 
-marr : HasIO io => (n : Nat) -> io (k ** IOArray k (Outcome es a))
+marr : Lift1 World f => (n : Nat) -> f (k ** IOArray k (Outcome es a))
 marr n = do
-  arr <- newIOArray n Canceled
+  arr <- marray n Canceled
   pure (n ** arr)
 
 ||| Runs the given list of computations in parallel.

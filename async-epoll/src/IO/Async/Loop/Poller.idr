@@ -68,9 +68,9 @@ record Poller where
 export
 poller : (maxFiles : Nat) -> IO1 Poller
 poller maxFiles t =
-  let waiting # t := Ref1.ref Z t
-      handles # t := newMArray maxFiles hdummy t
-      events  # t := ioToF1 (malloc SEpollEvent maxFiles) t
+  let waiting # t := ref1 Z t
+      handles # t := marray1 maxFiles hdummy t
+      events  # t := malloc1 SEpollEvent maxFiles t
       epoll   # t := dieOnErr (epollCreate 0) t
    in P waiting maxFiles handles events epoll # t
 
@@ -199,7 +199,7 @@ parameters (p         : Poller)
              -- between running the file handle once an event is ready and
              -- cancelation, which might happen externally and from a different
              -- thread
-             r # t := Ref1.ref True t
+             r # t := ref1 True t
              _ # t := AC.set p.handles v (\e => once r (act v e)) t
              _ # t := mod1 p.waiting S t
           in once r (cleanup v) # t

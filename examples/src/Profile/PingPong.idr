@@ -31,7 +31,7 @@ parameters {auto has : Has Errno es}
   iterate : Nat -> Prog es ()
   iterate n = do
     def <- deferredOf ()
-    ref <- newIORef n
+    ref <- newref n
     q   <- bqueueOf () 1
     _   <- start $ repeat {es} n (start $ effect def q ref)
     await def
