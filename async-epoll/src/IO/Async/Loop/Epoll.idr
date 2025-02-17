@@ -1,6 +1,7 @@
 module IO.Async.Loop.Epoll
 
 import public Data.Nat
+import Control.Monad.Elin
 import Data.Array.Core as AC
 import Data.Array.Mutable
 import Data.Bits
@@ -26,7 +27,6 @@ import public IO.Async.Loop.SignalH
 import System
 import System.Linux.Signalfd.Prim
 import System.Linux.Timerfd.Prim
-import System.Posix.Errno.IO
 import System.Posix.File.Prim
 import System.Posix.Limits
 
@@ -253,6 +253,9 @@ mkThreadPool (Element (S k) _) = do
   let tp := TP k ts ws
   pure (tp, EL submit cede (head ws))
 
+toIO : Elin World [Errno] () -> IO ()
+toIO = ignore . runElinIO
+
 ||| Starts an epoll-based event loop and runs the given async
 ||| program to completion.
 |||
@@ -267,7 +270,7 @@ app :
   -> (prog : Async EpollST [] ())
   -> IO ()
 app n sigs prog = do
-  sigprocmask SIG_BLOCK sigs
+  toIO $ sigprocmask SIG_BLOCK sigs
   (tp,el) <- mkThreadPool n
   tg <- newTokenGen
   runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)

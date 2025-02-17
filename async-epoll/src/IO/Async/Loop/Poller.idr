@@ -14,7 +14,6 @@ import System
 import System.Linux.Epoll.Prim
 import System.Linux.Signalfd.Prim
 import System.Linux.Timerfd.Prim
-import System.Posix.Errno.IO
 import System.Posix.File.Prim
 import System.Posix.Limits
 
@@ -24,11 +23,11 @@ import System.Posix.Limits
 -- Utilities
 --------------------------------------------------------------------------------
 
-dieOnErr : EPrim a -> IO1 a
+dieOnErr : E1 World [Errno] a -> IO1 a
 dieOnErr act t =
   case act t of
-    R r t => r # t
-    E x t => ioToF1 (die "Error: \{errorText x} (\{errorName x})") t
+    R r        t => r # t
+    E (Here x) t => ioToF1 (die "Error: \{errorText x} (\{errorName x})") t
 
 public export
 0 FileHandle : Type
@@ -123,7 +122,7 @@ parameters (p         : Poller)
 
   -- calls `epoll_ctl` via the FFI to handle the file descriptor
   %inline
-  ctl  : EpollOp -> EPrim ()
+  ctl  : EpollOp -> E1 World [Errno] ()
   ctl op = epollCtl p.epoll op fd ev
 
   -- close the file descriptor if `autoClose` is set to `True`
@@ -176,7 +175,7 @@ parameters (p         : Poller)
       -- now trying to register the file descriptor at epoll
       Just v  => case ctl Add t of
         -- oops, this failed
-        E x t => case x == EPERM of
+        E (Here x) t => case x == EPERM of
           -- not a pollable file descriptor. we just invoke the callback with the
           -- given `Event`. this allows us to use the event loop even with
           -- regular files, giving us a single interface for asynchronous

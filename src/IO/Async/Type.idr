@@ -6,6 +6,7 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import public Data.Linear.ELift1
 import public IO.Async.MCancel
 import public IO.Async.Outcome
 
@@ -106,23 +107,12 @@ env = Env
 -- Fiber Implementation (Here be Dragons)
 --------------------------------------------------------------------------------
 
-export
-Functor (Async e es) where
-  map f v = Bind v (Val . f)
-
-export
-Applicative (Async e es) where
-  pure      = Val
-  ff <*> vv = Bind ff (<$> vv)
-
-export
-Monad (Async e es) where
-  (>>=) = Bind
-
 export %inline
 MErr (Async e) where
   fail    = Err
   attempt = Attempt
+  bind    = Bind
+  succeed = Val
 
 export %inline
 HasIO (Async e es) where
@@ -135,8 +125,8 @@ MCancel (Async e) where
   uncancelable f = UC $ \t,n => f (APoll t n)
 
 export %inline
-Lift1 World (Async e es) where
-  lift1 = runIO
+ELift1 World (Async e) where
+  elift1 act = sync $ runIO $ \t => toResult (act t)
 
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)

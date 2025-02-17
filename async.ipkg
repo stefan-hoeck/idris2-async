@@ -6,6 +6,7 @@ brief   = "Asynchronous and concurrent computations in Idris2"
 depends = base >= 0.7.0
         , array
         , containers
+        , elin
         , posix
         , quantifiers-extra
 
@@ -14,7 +15,6 @@ modules = IO.Async
         , IO.Async.Deferred
         , IO.Async.File
         , IO.Async.MCancel
-        , IO.Async.MErr
         , IO.Async.Outcome
         , IO.Async.Posix
         , IO.Async.Resource

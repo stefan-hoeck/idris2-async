@@ -1,20 +1,11 @@
 module IO.Async.Outcome
 
 import Derive.Prelude
+import public Control.Monad.MErr
 import public Data.List.Quantifiers.Extra
 
 %default total
 %language ElabReflection
-
-||| Alias for `Either (HSum es) a`: A computation that either
-||| succeeds with a result of type `a` or fails with an error
-||| of one of the types given in list `es`.
-|||
-||| Note: If `es` is the empty list, the computation cannot fail,
-||| because `HSum []` is uninhabited.
-public export
-0 Result : List Type -> Type -> Type
-Result es a = Either (HSum es) a
 
 public export
 data Outcome : List Type -> Type -> Type where
