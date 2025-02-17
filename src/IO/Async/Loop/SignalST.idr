@@ -82,7 +82,7 @@ parameters (si : Sighandler)
             [] # t => () # t -- no pending signals. abort.
             ss # t => case filter (hasHandle st) ss of -- check handled signals
               [] => () # t -- we don't handle any pending signals. abort.
-              ss => case sigwaitinfo ss t of
+              ss => case sigwaitinfo {es = [Errno]} ss t of
                 E _   t => () # t
                 R inf t => case lookup inf.signal st.map of
                   Nothing => () # t

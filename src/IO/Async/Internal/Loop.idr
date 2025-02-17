@@ -27,7 +27,7 @@ dummy : IO1 ()
 dummy = \t => () # t
 
 export %inline
-io1 : EPrim () -> IO1 ()
+io1 : E1 World [Errno] () -> IO1 ()
 io1 act t =
   case act t of
     R _ t => () # t

@@ -1,6 +1,6 @@
 module IO.Async.MCancel
 
-import public IO.Async.MErr
+import public Control.Monad.MErr
 import public IO.Async.Outcome
 
 %default total

@@ -5,10 +5,6 @@ import public Data.Linear.Ref1
 
 %default total
 
-public export
-0 IO1 : Type -> Type
-IO1 = F1 World
-
 ||| Initial work package sent to an event loop.
 |||
 ||| Most work will be run on one of the worker threads of a thread pool,
