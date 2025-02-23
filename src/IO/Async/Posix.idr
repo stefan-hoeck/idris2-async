@@ -2,7 +2,6 @@ module IO.Async.Posix
 
 import public IO.Async
 
-import Data.Linear.Token
 import Data.C.Ptr
 import System.Posix.Dir
 import System.Posix.File
@@ -14,22 +13,22 @@ import System.Posix.File
 --------------------------------------------------------------------------------
 
 export %inline
-Resource (CArrayIO n a) where
-  cleanup = liftIO . free
+ELift1 World f => Resource f (CArrayIO n a) where
+  cleanup = lift1 . free1
 
 export %inline
-Struct a => Resource a where
-  cleanup = freeStruct
+ELift1 World f => Struct a => Resource f a where
+  cleanup s = lift1 {s = World} $ ffi (prim__free $ unwrap s)
 
 export %inline
-Resource Dir where
+ELift1 World f => Resource f Dir where
   cleanup d = dropErrs {es = [Errno]} (closedir d)
 
 export %inline
-Resource CPtr where
-  cleanup = freePtr
+ELift1 World f => Resource f CPtr where
+  cleanup p = lift1 (freePtr1 p)
 
 namespace Fd
   export %inline
-  Cast a Fd => Resource a where
+  ELift1 World f => Cast a Fd => Resource f a where
     cleanup fd = dropErrs {es = [Errno]} (close fd)

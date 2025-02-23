@@ -6,9 +6,8 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Internal.Token
+import public Control.Monad.MCancel
 import public Data.Linear.ELift1
-import public IO.Async.MCancel
-import public IO.Async.Outcome
 
 %default total
 

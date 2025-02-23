@@ -22,7 +22,7 @@ ipkg = "async-examples.ipkg"
 [custom.all.elin]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-elin"
-commit = "latest:main"
+commit = "latest:monadcancel"
 ipkg   = "elin.ipkg"
 
 [custom.all.ref1]

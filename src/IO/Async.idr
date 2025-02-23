@@ -1,6 +1,6 @@
 module IO.Async
 
-import public IO.Async.Outcome
-import public IO.Async.Resource
+import public Control.Monad.MCancel
+import public Control.Monad.Resource
 import public IO.Async.Type
 import public IO.Async.Util
