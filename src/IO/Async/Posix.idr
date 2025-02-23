@@ -13,14 +13,6 @@ import System.Posix.File
 --------------------------------------------------------------------------------
 
 export %inline
-ELift1 World f => Resource f (CArrayIO n a) where
-  cleanup = lift1 . free1
-
-export %inline
-ELift1 World f => Struct a => Resource f a where
-  cleanup s = lift1 {s = World} $ ffi (prim__free $ unwrap s)
-
-export %inline
 ELift1 World f => Resource f Dir where
   cleanup d = dropErrs {es = [Errno]} (closedir d)
 
