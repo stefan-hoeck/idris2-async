@@ -34,13 +34,13 @@ ipkg   = "ref1.ipkg"
 [custom.all.posix]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-linux"
-commit = "latest:main"
+commit = "latest:threaded_struct"
 ipkg   = "posix/posix.ipkg"
 
 [custom.all.linux]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-linux"
-commit = "latest:main"
+commit = "latest:threaded_struct"
 ipkg   = "linux/linux.ipkg"
 
 [custom.all.cptr]
