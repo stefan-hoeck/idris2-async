@@ -1,6 +1,5 @@
 module IO.Async.Signal
 
-import IO.Async.Outcome
 import IO.Async.Type
 import IO.Async.Loop.SignalH
 import IO.Async.Util

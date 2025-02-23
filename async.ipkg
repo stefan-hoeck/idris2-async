@@ -14,10 +14,7 @@ modules = IO.Async
         , IO.Async.BQueue
         , IO.Async.Deferred
         , IO.Async.File
-        , IO.Async.MCancel
-        , IO.Async.Outcome
         , IO.Async.Posix
-        , IO.Async.Resource
         , IO.Async.Semaphore
         , IO.Async.Signal
         , IO.Async.Type
