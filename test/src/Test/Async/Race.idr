@@ -1,7 +1,7 @@
 module Test.Async.Race
 
 import System.Posix.Errno
-import IO.Async.Outcome
+import Control.Monad.MCancel
 import Derive.Prelude
 import Test.Async.Spec
 
