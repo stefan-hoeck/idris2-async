@@ -108,10 +108,12 @@ env = Env
 
 export %inline
 MErr (Async e) where
-  fail    = Err
-  attempt = Attempt
-  bind    = Bind
-  succeed = Val
+  fail          = Err
+  attempt       = Attempt
+  bind          = Bind
+  succeed       = Val
+  mapImpl f v   = Bind v (Val . f)
+  appImpl ff fv = Bind ff (`mapImpl` fv)
 
 export %inline
 HasIO (Async e es) where
