@@ -1,5 +1,6 @@
 module IO.Async.Util
 
+import Control.Monad.Resource
 import Data.Array
 import Data.Array.Mutable
 import Data.Maybe
@@ -58,6 +59,10 @@ wait = ignore . join
 export
 cancel : (target : Fiber es a) -> Async e fs ()
 cancel f = uncancelable $ \_ => runIO f.cancel_ >> ignore (join f)
+
+export %inline
+Resource (Async e) (Fiber es a) where
+  cleanup = wait
 
 --------------------------------------------------------------------------------
 -- Spawning Fibers
