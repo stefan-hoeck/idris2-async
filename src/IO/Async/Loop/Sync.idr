@@ -16,13 +16,13 @@ import System.Clock
 record Timed where
   constructor T
   canceled : IORef Bool
-  act      : Either Errno () -> IO1 ()
+  act      : IO1 ()
 
 -- run a timer if it has not been canceled yet
 runTimer : Timed -> IO1 ()
 runTimer tm t =
   let False # t := read1 tm.canceled t | _ # t => () # t
-   in tm.act (Right ()) t
+   in tm.act t
 
 --------------------------------------------------------------------------------
 -- Loop State
