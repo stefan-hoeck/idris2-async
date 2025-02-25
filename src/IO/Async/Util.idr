@@ -355,17 +355,14 @@ export
 lazy : Lazy a -> Async e es a
 lazy v = primAsync_ $ \cb => cb (Right v)
 
-parameters {auto has : Has Errno es}
-           {auto tim : TimerH e}
+parameters {auto tim : TimerH e}
 
   ||| Delay a computation by the given number of nanoseconds.
   export
   sleep : (dur : Clock Duration) -> Async e es ()
   sleep dur = do
     ev <- env
-    primAsync $ \cb => primWait ev dur $ \case
-      Right _ => cb (Right ())
-      Left  x => cb (Left $ inject x)
+    primAsync $ \cb => primWait ev dur $ cb (Right ())
 
   ||| Delay a computation by the given number of nanoseconds.
   export

@@ -187,7 +187,7 @@ Epoll EpollST where
 
 export %inline
 TimerH EpollST where
-  primWait s dur f = schedule s.timer dur (f (Right ()))
+  primWait s dur f = schedule s.timer dur f
 
 export %inline
 SignalH EpollST where
