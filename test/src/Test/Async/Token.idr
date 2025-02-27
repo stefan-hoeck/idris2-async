@@ -17,9 +17,7 @@ covering
 instrs : List FlatSpecInstr
 instrs =
   [ "`token`" `should` "generate a new unique token every time it is invoked" `at`
-      (assert
-        (uniqueCount <$> traverse (const token) units)
-        100)
+      (assert (uniqueCount <$> traverse (const token) units) 100)
   ]
 
 export covering
