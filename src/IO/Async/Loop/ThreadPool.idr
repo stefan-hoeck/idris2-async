@@ -20,7 +20,6 @@ import public IO.Async
 import public IO.Async.Loop
 
 import IO.Async.Internal.Ref
-import IO.Async.Internal.Token
 import Data.Linear.Traverse1
 import Data.List
 import Data.List1
@@ -153,7 +152,6 @@ app n act = do
   (el,close) <- mkThreadPool n
   m  <- primIO mkMutex
   c  <- primIO makeCondition
-  tg <- newTokenGen
   runAsyncWith 1024 el act (\_ => putStrLn "Done. Shutting down" >> fromPrim (conditionBroadcast c))
   primIO $ acqMutex m
   primIO $ conditionWait c m

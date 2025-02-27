@@ -19,6 +19,10 @@ data ST : Type -> Type where
 
 ||| An atomic reference that can be set exactly once and observed
 ||| by at most one observer.
+|||
+||| There are many occasions when it is enough to be able to register
+||| only one observer. Use `Deferred1` for these, and use `Deferred` in
+||| case you need to register many observers.
 export
 record Deferred1 a where
   constructor D1

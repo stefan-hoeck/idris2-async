@@ -5,7 +5,8 @@ import IO.Async.Loop
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Internal.Token
+import IO.Async.Unique
+
 import public Control.Monad.MCancel
 import public Data.Linear.ELift1
 
@@ -176,9 +177,9 @@ record FiberImpl (e : Type) (es : List Type) (a : Type) where
   st     : IORef (FiberST es a)
 
 -- allocates a new fiber, setting its initial state to `Running`
-newFiber : TokenGen => EventLoop e -> IO1 (FiberImpl e es a)
+newFiber : EventLoop e -> IO1 (FiberImpl e es a)
 newFiber el t =
-  let tok  # t := Token.token t
+  let tok  # t := Unique.token1 t
       env  # t := ref1 el.init t
       st   # t := ref1 (FS 0 [] False Running) t
    in FI tok env st # t
@@ -309,8 +310,7 @@ hooks (Hook h :: t) = prepend h (hooks t)
 hooks (_ :: t)      = hooks t
 hooks []            = [Abort]
 
-parameters {auto tg : TokenGen}
-           (limit   : Nat)
+parameters (limit   : Nat)
 
   -- Invokes runR or runC depending on if the fiber has
   -- been canceled and cancelation is currently observable
