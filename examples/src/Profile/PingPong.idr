@@ -21,20 +21,20 @@ usage =
 
 parameters {auto has : Has Errno es}
   
-  effect : Deferred () -> BQueue () -> IORef Nat -> Prog es ()
+  effect : Deferred1 () -> BQueue () -> IORef Nat -> Prog es ()
   effect def q ref = do
     _ <- start (enqueue {es} q ())
     dequeue q
     1 <- update ref (\x => (pred x, x)) | _ => pure ()
-    put def ()
+    put1 def ()
 
   iterate : Nat -> Prog es ()
   iterate n = do
-    def <- deferredOf ()
+    def <- deferred1Of ()
     ref <- newref n
     q   <- bqueueOf () 1
     _   <- start $ repeat {es} n (start $ effect def q ref)
-    await def
+    await1 def
     
 
   measure : Nat -> Prog es ()
