@@ -189,9 +189,9 @@ race []  = pure Nothing
 race [x] = map Just x
 race xs  =
   uncancelable $ \poll => do
-    def <- deferredOf (Outcome es a)
-    fs  <- traverse (\f => start $ guaranteeCase f (put def)) xs
-    flip guarantee (traverse_ cancel fs) $ poll (await def) >>= \case
+    def <- deferred1Of (Outcome es a)
+    fs  <- traverse (\f => start $ guaranteeCase f (put1 def)) xs
+    flip guarantee (traverse_ cancel fs) $ poll (await1 def) >>= \case
       Succeeded res => pure (Just res)
       Error err     => fail err
       Canceled      => pure Nothing

@@ -18,17 +18,17 @@ usage =
   """
 
 parameters {auto has : Has Errno es}
-  iterate : Deferred () -> Nat -> Prog es ()
-  iterate def 0     = put def ()
+  iterate : Deferred1 () -> Nat -> Prog es ()
+  iterate def 0     = put1 def ()
   iterate def (S k) = do
     pure ()
     ignore $ start (iterate def k)
 
   spawn : Nat -> Prog es ()
   spawn n = do
-    def <- deferredOf ()
+    def <- deferred1Of ()
     _   <- start $ iterate def n
-    await def
+    await1 def
 
   measure : Nat -> Prog es ()
   measure n = do

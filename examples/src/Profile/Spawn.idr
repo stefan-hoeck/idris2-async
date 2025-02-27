@@ -18,17 +18,17 @@ usage =
   """
 
 parameters {auto has : Has Errno es}
-  effect : IORef Nat -> Deferred () -> Prog es ()
+  effect : IORef Nat -> Deferred1 () -> Prog es ()
   effect ref def = do
     b <- runIO (casupdate1 ref (\x => (pred x, x==1)))
-    when b (put def ())
+    when b (put1 def ())
 
   spawn : Nat -> Prog es ()
   spawn n = do
-    def <- deferredOf ()
+    def <- deferred1Of ()
     ref <- newref n
     repeat n (start $ effect ref def)
-    await def
+    await1 def
 
   measure : Nat -> Prog es ()
   measure n = do

@@ -12,27 +12,27 @@ record ST a where
   constructor S
   capacity : Nat
   queue    : Queue a
-  takers   : Queue (Deferred a)
-  offerers : Queue (a,Deferred ())
+  takers   : Queue (Deferred1 a)
+  offerers : Queue (a,Deferred1 ())
 
 %inline
-deq : Poll (Async e) -> Deferred a -> ST a -> (ST a, Async e es a)
+deq : Poll (Async e) -> Deferred1 a -> ST a -> (ST a, Async e es a)
 deq poll def (S cap q ts os) =
   case dequeue q of
     Just (n,q2) => case dequeue os of
       Nothing           => (S (S cap) q2 ts os,  pure n)
-      Just ((x,o), os2) => (S cap (enqueue q2 x) ts os2, put o () $> n)
+      Just ((x,o), os2) => (S cap (enqueue q2 x) ts os2, put1 o () $> n)
     Nothing     => case dequeue os of
-      Nothing           => (S cap q (enqueue ts def) os, poll (await def))
-      Just ((x,o), os2) => (S cap q ts os2, put o () $> x)
+      Nothing           => (S cap q (enqueue ts def) os, poll (await1 def))
+      Just ((x,o), os2) => (S cap q ts os2, put1 o () $> x)
 
 %inline
-enq : Poll (Async e) -> Deferred () -> a -> ST a -> (ST a, Async e es ())
+enq : Poll (Async e) -> Deferred1 () -> a -> ST a -> (ST a, Async e es ())
 enq poll def n (S cap q ts os) =
   case dequeue ts of
-    Just (def,ts2) => (S cap q ts2 os, put def n)
+    Just (def,ts2) => (S cap q ts2 os, put1 def n)
     Nothing        => case cap of
-      0   => (S 0 q ts (enqueue os (n,def)), poll (await def))
+      0   => (S 0 q ts (enqueue os (n,def)), poll (await1 def))
       S k => (S k (enqueue q n) ts os, pure ())
 
 ||| A concurrent, bounded queue holding values of type `a`.
@@ -60,7 +60,7 @@ bqueueOf _ = bqueue
 export
 enqueue : BQueue a -> a -> Async e es ()
 enqueue (BQ ref) v = do
-  def <- deferredOf ()
+  def <- deferred1Of ()
   uncancelable $ \poll => do
     act <- update ref (enq poll def v)
     act
@@ -70,7 +70,7 @@ enqueue (BQ ref) v = do
 export
 dequeue : BQueue a -> Async e es a
 dequeue (BQ ref) = do
-  def <- deferredOf a
+  def <- deferred1Of a
   uncancelable $ \poll => do
     act <- update ref (deq poll def)
     act
