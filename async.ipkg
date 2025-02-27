@@ -18,6 +18,7 @@ modules = IO.Async
         , IO.Async.Semaphore
         , IO.Async.Signal
         , IO.Async.Type
+        , IO.Async.Unique
         , IO.Async.Util
 
         , IO.Async.Loop
@@ -31,6 +32,5 @@ modules = IO.Async
         , IO.Async.Internal.Concurrent
         , IO.Async.Internal.Loop
         , IO.Async.Internal.Ref
-        , IO.Async.Internal.Token
 
 sourcedir = "src"

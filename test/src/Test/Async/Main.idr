@@ -4,6 +4,7 @@ import Test.Async.Cancel
 import Test.Async.Core
 import Test.Async.Race
 import Test.Async.Spec
+import Test.Async.Token
 
 covering
 main : IO ()
@@ -13,4 +14,5 @@ main =
       [ Core.specs
       , Cancel.specs
       , Race.specs
+      , Token.specs
       ]

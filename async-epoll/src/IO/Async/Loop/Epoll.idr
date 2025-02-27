@@ -12,7 +12,6 @@ import Data.Vect
 
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Internal.Token
 import IO.Async.Loop.Poller
 import IO.Async.Loop.SignalST
 import IO.Async.Loop.TimerST
@@ -272,7 +271,6 @@ app :
 app n sigs prog = do
   toIO $ sigprocmask SIG_BLOCK sigs
   (tp,el) <- mkThreadPool n
-  tg <- newTokenGen
   runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
   runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
