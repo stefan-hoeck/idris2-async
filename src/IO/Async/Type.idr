@@ -5,7 +5,7 @@ import IO.Async.Loop
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Unique
+import Data.Linear.Unique
 
 import public Control.Monad.MCancel
 import public Data.Linear.ELift1
@@ -44,7 +44,7 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
   OnCncl : (act : Async e es a) -> (hook : Async e [] ()) -> Async e es a
 
   -- Masks a fiber as uncanceble
-  UC     : (Token -> Nat -> Async e es a) -> Async e es a
+  UC     : (Token World -> Nat -> Async e es a) -> Async e es a
 
   Attempt : Async e es a -> Async e fs (Result es a)
 
@@ -60,7 +60,7 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
   Asnc   : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 
   -- Temporarily undo a layer of uncancelability
-  APoll  : Token -> Nat -> Async e es a -> Async e es a
+  APoll  : Token World -> Nat -> Async e es a -> Async e es a
 
   -- Internal checking if asynchronous results are available.
   -- We only check after we have been notified that a result is ready.
@@ -135,7 +135,7 @@ ELift1 World (Async e) where
 --------------------------------------------------------------------------------
 
 %inline
-emptyCBs : (0 es : _) -> (0 a : _) -> List (Token, Callback es a)
+emptyCBs : (0 es : _) -> (0 a : _) -> List (Token World, Callback es a)
 emptyCBs _ _ = []
 
 -- State of a fiber
@@ -172,7 +172,7 @@ record FiberST (es : List Type) (a : Type) where
 
 record FiberImpl (e : Type) (es : List Type) (a : Type) where
   constructor FI
-  token  : Token
+  token  : Token World
   env    : IORef e
   st     : IORef (FiberST es a)
 

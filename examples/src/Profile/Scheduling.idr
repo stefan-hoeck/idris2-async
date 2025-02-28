@@ -1,7 +1,6 @@
 module Profile.Scheduling
 
 import IO.Async.BQueue
-import IO.Async.Deferred
 import Opts
 import Profile.Util
 import System.Clock

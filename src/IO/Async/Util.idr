@@ -3,8 +3,8 @@ module IO.Async.Util
 import Control.Monad.Resource
 import Data.Array
 import Data.Array.Mutable
+import Data.Linear.Deferred
 import Data.Maybe
-import IO.Async.Deferred
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
@@ -66,6 +66,16 @@ Resource (Async e) (Fiber es a) where
 --------------------------------------------------------------------------------
 -- Spawning Fibers
 --------------------------------------------------------------------------------
+
+||| Awaits the completion of a `Once a`.
+export %inline
+awaitOnce : Once World a -> Async e es a
+awaitOnce o = primAsync $ \cb => observeOnce1 o (cb . Right)
+
+||| Awaits the completion of a `Deferred a`.
+export %inline
+await : Deferred World a -> Async e es a
+await d = primAsync $ \cb => observeDeferred1 d (cb . Right)
 
 ||| A low-level primitive for racing the evaluation of two fibers that returns the [[Outcome]]
 ||| of the winner and the [[Fiber]] of the loser. The winner of the race is considered to be
@@ -188,9 +198,9 @@ race []  = pure Nothing
 race [x] = map Just x
 race xs  =
   uncancelable $ \poll => do
-    def <- deferred1Of (Outcome es a)
-    fs  <- traverse (\f => start $ guaranteeCase f (put1 def)) xs
-    flip guarantee (traverse_ cancel fs) $ poll (await1 def) >>= \case
+    o  <- onceOf (Outcome es a)
+    fs <- traverse (\f => start $ guaranteeCase f (putOnce o)) xs
+    flip guarantee (traverse_ cancel fs) $ poll (awaitOnce o) >>= \case
       Succeeded res => pure (Just res)
       Error err     => fail err
       Canceled      => pure Nothing

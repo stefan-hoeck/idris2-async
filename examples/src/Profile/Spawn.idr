@@ -1,6 +1,6 @@
 module Profile.Spawn
 
-import IO.Async.Deferred
+import Data.Linear.Deferred
 import Opts
 import Profile.Util
 import System.Clock
@@ -18,17 +18,17 @@ usage =
   """
 
 parameters {auto has : Has Errno es}
-  effect : IORef Nat -> Deferred1 () -> Prog es ()
+  effect : IORef Nat -> Once World () -> Prog es ()
   effect ref def = do
     b <- runIO (casupdate1 ref (\x => (pred x, x==1)))
-    when b (put1 def ())
+    when b (putOnce def ())
 
   spawn : Nat -> Prog es ()
   spawn n = do
-    def <- deferred1Of ()
+    def <- onceOf ()
     ref <- newref n
     repeat n (start $ effect ref def)
-    await1 def
+    awaitOnce def
 
   measure : Nat -> Prog es ()
   measure n = do
