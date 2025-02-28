@@ -33,3 +33,5 @@ jobs:
         run: pack --no-prompt typecheck async-docs
       - name: Build examples
         run: pack --no-prompt typecheck async-examples
+      - name: Run tests
+        run: pack --no-prompt test async
