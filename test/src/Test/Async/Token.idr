@@ -11,7 +11,7 @@ units : List ()
 units = replicate 100 ()
 
 uniqueCount : Ord a => List a -> Nat
-uniqueCount = length . SortedSet.toList . SortedSet.fromList
+uniqueCount = length . Prelude.toList . SortedSet.fromList
 
 covering
 instrs : List FlatSpecInstr
