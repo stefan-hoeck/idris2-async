@@ -2,7 +2,6 @@ module Profile.Alloc
 
 import Data.Array
 import IO.Async.BQueue
-import IO.Async.Deferred
 import Opts
 import Profile.Util
 import System.Clock

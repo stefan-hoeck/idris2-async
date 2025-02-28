@@ -1,7 +1,7 @@
 module Profile.PingPong
 
+import Data.Linear.Deferred
 import IO.Async.BQueue
-import IO.Async.Deferred
 import Opts
 import Profile.Util
 import System.Clock
@@ -21,20 +21,20 @@ usage =
 
 parameters {auto has : Has Errno es}
   
-  effect : Deferred1 () -> BQueue () -> IORef Nat -> Prog es ()
+  effect : Once World () -> BQueue () -> IORef Nat -> Prog es ()
   effect def q ref = do
     _ <- start (enqueue {es} q ())
     dequeue q
     1 <- update ref (\x => (pred x, x)) | _ => pure ()
-    put1 def ()
+    putOnce def ()
 
   iterate : Nat -> Prog es ()
   iterate n = do
-    def <- deferred1Of ()
+    def <- onceOf ()
     ref <- newref n
     q   <- bqueueOf () 1
     _   <- start $ repeat {es} n (start $ effect def q ref)
-    await1 def
+    awaitOnce def
     
 
   measure : Nat -> Prog es ()

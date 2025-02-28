@@ -12,13 +12,11 @@ depends = base >= 0.7.0
 
 modules = IO.Async
         , IO.Async.BQueue
-        , IO.Async.Deferred
         , IO.Async.File
         , IO.Async.Posix
         , IO.Async.Semaphore
         , IO.Async.Signal
         , IO.Async.Type
-        , IO.Async.Unique
         , IO.Async.Util
 
         , IO.Async.Loop

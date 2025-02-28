@@ -1,6 +1,6 @@
 module Profile.ChainedSpawn
 
-import IO.Async.Deferred
+import Data.Linear.Deferred
 import Opts
 import Profile.Util
 import System.Clock
@@ -18,17 +18,17 @@ usage =
   """
 
 parameters {auto has : Has Errno es}
-  iterate : Deferred1 () -> Nat -> Prog es ()
-  iterate def 0     = put1 def ()
+  iterate : Once World () -> Nat -> Prog es ()
+  iterate def 0     = putOnce def ()
   iterate def (S k) = do
     pure ()
     ignore $ start (iterate def k)
 
   spawn : Nat -> Prog es ()
   spawn n = do
-    def <- deferred1Of ()
+    def <- onceOf ()
     _   <- start $ iterate def n
-    await1 def
+    awaitOnce def
 
   measure : Nat -> Prog es ()
   measure n = do
