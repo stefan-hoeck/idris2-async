@@ -31,7 +31,7 @@ dieOnErr act t =
 
 public export
 0 FileHandle : Type
-FileHandle = Event -> IO1 ()
+FileHandle = PollEvent -> IO1 ()
 
 hdummy : FileHandle
 hdummy = \_ => dummy
@@ -86,9 +86,9 @@ parameters (p : Poller)
       Just v  => AC.get p.handles v t
       Nothing => hdummy # t
 
-  handleEvs : List EpollEvent -> IO1 ()
+  handleEvs : List PollPair -> IO1 ()
   handleEvs []            t = () # t
-  handleEvs (E ev fd::es) t =
+  handleEvs (PP fd ev::es) t =
     let h # t := getHandle fd t
         _ # t := h ev t
      in  handleEvs es t
@@ -116,9 +116,9 @@ parameters (p : Poller)
 
 parameters (p         : Poller)
            (fd        : Fd)
-           (ev        : Event)
+           (ev        : PollEvent)
            (autoClose : Bool)
-           (cb        : Either Errno Event -> IO1 ())
+           (cb        : Either Errno PollEvent -> IO1 ())
 
   -- calls `epoll_ctl` via the FFI to handle the file descriptor
   %inline
@@ -152,7 +152,7 @@ parameters (p         : Poller)
   -- we invoke the callback and close the file returning a
   -- dummy cleanup hook
   %inline
-  abrt : Either Errno Event -> IO1 (IO1 ())
+  abrt : Either Errno PollEvent -> IO1 (IO1 ())
   abrt res t =
     let _ # t := cb res t
         _ # t := closefd t
@@ -177,7 +177,7 @@ parameters (p         : Poller)
         -- oops, this failed
         E (Here x) t => case x == EPERM of
           -- not a pollable file descriptor. we just invoke the callback with the
-          -- given `Event`. this allows us to use the event loop even with
+          -- given `PollEvent`. this allows us to use the event loop even with
           -- regular files, giving us a single interface for asynchronous
           -- reading and writing of files
           True  => abrt (Right ev) t
