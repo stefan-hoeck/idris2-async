@@ -17,9 +17,9 @@ interface Epoll a where
   primEpoll :
        a
     -> Fd
-    -> Event
+    -> PollEvent
     -> (autoClose : Bool)
-    -> (Either Errno Event -> IO1 ())
+    -> (Either Errno PollEvent -> IO1 ())
     -> IO1 (IO1 ())
 
 parameters {auto has : Has Errno es}
@@ -34,7 +34,7 @@ parameters {auto has : Has Errno es}
   ||| because it is a regular file, this will immediately return
   ||| `ev`.
   export
-  epoll : (ev : Event) -> Async e es Event
+  epoll : (ev : PollEvent) -> Async e es PollEvent
   epoll ev = do
     st <- env
     primAsync $ \cb => primEpoll st (cast fd) ev False $ \case
@@ -46,7 +46,7 @@ parameters {auto has : Has Errno es}
   ||| This allows us to read from or write to a file descriptor
   ||| without blocking an operating system thread.
   export
-  onEvent : Event -> Async e es a -> Async e es a
+  onEvent : PollEvent -> Async e es a -> Async e es a
   onEvent ev act = do
     evt <- epoll ev
     case hasEvent evt ev of
@@ -60,7 +60,7 @@ parameters {auto has : Has Errno es}
   ||| blocking pipes and sockets.
   export
   readnb : (0 r : Type) -> FromBuf r => Bits32 -> Async e es r
-  readnb r n = onEvent EPOLLIN (read fd r n)
+  readnb r n = onEvent POLLIN (read fd r n)
 
   ||| Writes to a file descriptor without blocking.
   |||
@@ -69,7 +69,7 @@ parameters {auto has : Has Errno es}
   ||| blocking pipes and sockets.
   export
   writenb : ToBuf r => r -> Async e es Bits32
-  writenb v = onEvent EPOLLOUT (write fd v)
+  writenb v = onEvent POLLOUT (write fd v)
 
   ||| Iteratively writes a value to a file descriptor making sure
   ||| that the whole value is written. Use this, if a single call to
@@ -107,7 +107,7 @@ parameters {auto has : Has Errno es}
     -> (r -> Async e es ())
     -> Async e es ()
   stream r buf act =
-    onEvent EPOLLIN (read fd Buf buf) >>= \case
+    onEvent POLLIN (read fd Buf buf) >>= \case
       B 0 _ => pure ()
       b     => do
         v <- runIO (fromBuf b)
@@ -130,7 +130,7 @@ parameters {auto has : Has Errno es}
     -> (r -> Async e es ())
     -> Async e es ()
   streamp r cp act =
-    onEvent EPOLLIN (readPtr fd CPtr cp) >>= \case
+    onEvent POLLIN (readPtr fd CPtr cp) >>= \case
       CP 0 _ => pure ()
       cp2    => do
         v <- runIO (fromPtr cp2)
