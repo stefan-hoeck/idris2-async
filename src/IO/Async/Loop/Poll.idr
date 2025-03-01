@@ -1,36 +1,52 @@
-module IO.Async.Loop.Epoll
+module IO.Async.Loop.Poll
 
 import public Data.Nat
+import public IO.Async
+import public IO.Async.Loop
+import public IO.Async.Loop.PollH
+import public IO.Async.Loop.SignalH
+import public IO.Async.Loop.TimerH
+
 import Control.Monad.Elin
+
 import Data.Array.Core as AC
 import Data.Array.Mutable
-import Data.Bits
-import Data.DPair
 import Data.Linear.Traverse1
 import Data.Queue
 import Data.Vect
 
 import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
-import IO.Async.Loop.Poller
 import IO.Async.Loop.SignalST
 import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
-import public IO.Async
-import public IO.Async.Loop
-import public IO.Async.Epoll
-import public IO.Async.Loop.TimerH
-import public IO.Async.Loop.SignalH
-
 import System
 import System.Posix.File.Prim
+import System.Posix.Poll.Prim
 import System.Posix.Limits
 
 %default total
 
 --------------------------------------------------------------------------------
--- EpollST
+-- Poller
+--------------------------------------------------------------------------------
+
+public export
+record Poller where
+  constructor MkPoller
+  poll     : IO1 ()
+  pollWait : Clock Duration -> IO1 ()
+  release  : IO1 ()
+  pollFile :
+       (fd        : Fd)
+    -> (ev        : PollEvent)
+    -> (autoClose : Bool)
+    -> (cb        : Either Errno PollEvent -> IO1 ())
+    -> IO1 (IO1 ())
+
+--------------------------------------------------------------------------------
+-- LoopST
 --------------------------------------------------------------------------------
 
 POLL_ITER : Nat
@@ -38,7 +54,7 @@ POLL_ITER = 16
 
 -- State of a physical worker thread in a thread-pool.
 export
-record EpollST where
+record Poll where
   constructor W
   ||| Number of worker threads in the pool
   size     : Nat
@@ -53,12 +69,12 @@ record EpollST where
   ||| a costly operation, we want to prevent this from being
   ||| rescheduled (stolen by other workers) when this worker's
   ||| queue is empty.
-  ceded    : IORef (Maybe $ Package EpollST)
+  ceded    : IORef (Maybe $ Package Poll)
 
   ||| Work queues of all worker threads
-  queues   : IOArray size (Queue $ Package EpollST)
+  queues   : IOArray size (Queue $ Package Poll)
 
-  ||| The `epoll` file descriptor used for polling
+  ||| The state used for polling file descriptors
   poller   : Poller
 
   ||| Remaining number of stealers. To reduce contention,
@@ -74,21 +90,21 @@ record EpollST where
 
 public export
 0 Task : Type
-Task = Package EpollST
+Task = Package Poll
 
 -- initialize the state of a worker thread.
 workST :
      {n : Nat}
   -> Fin n
-  -> (maxFiles : Nat)
+  -> (mkPoll : IO1 Poller)
   -> IOArray n (Queue Task)
   -> (stealers : IORef Nat)
-  -> IO EpollST
-workST me maxFiles queues stealers =
+  -> IO Poll
+workST me mkPoll queues stealers =
   runIO $ \t =>
     let alive # t := ref1 Run t
         ceded # t := ref1 Nothing t
-        poll  # t := Poller.poller maxFiles t
+        poll  # t := mkPoll t 
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
      in W n me alive ceded queues poll stealers tim sigh # t
@@ -105,7 +121,7 @@ pollDuration : Integer -> Clock Duration
 pollDuration 0 = 1.ms
 pollDuration n = (cast $ min n 1_000_000).ns -- at most one milli second
 
-parameters (s : EpollST)
+parameters (s : Poll)
 
   -- appends the currently ceded task (if any) to the work queue,
   -- because we have other work to do
@@ -157,7 +173,7 @@ parameters (s : EpollST)
       Stop # t => () # t
       Run  # t => case cpoll of
         0   =>
-          let _ # t := poll s.poller t
+          let _ # t := s.poller.poll t
               _ # t := checkSignals s.signals t
            in loop POLL_ITER t
         S k =>
@@ -166,28 +182,28 @@ parameters (s : EpollST)
                Just tsk # t => let _ # t := tsk.act t in loop k t
                Nothing  # t =>
                  let _ # t := checkSignals s.signals t
-                     _ # t := pollWait s.poller (pollDuration r) t
+                     _ # t := s.poller.pollWait (pollDuration r) t
                   in loop POLL_ITER t
 
-release : EpollST -> IO ()
-release s = do
-  free s.poller.events
-  fromPrim (close' s.poller.epoll)
-
+-- release : EpollST -> IO ()
+-- release s = do
+--   free s.poller.events
+--   fromPrim (close' s.poller.epoll)
+-- 
 --------------------------------------------------------------------------------
 -- Interfaces
 --------------------------------------------------------------------------------
 
 export %inline
-Epoll EpollST where
-  primEpoll s = pollFile s.poller
+PollH Poll where
+  primPoll s = s.poller.pollFile
 
 export %inline
-TimerH EpollST where
+TimerH Poll where
   primWait s dur f = schedule s.timer dur f
 
 export %inline
-SignalH EpollST where
+SignalH Poll where
   primOnSignals s sigs f = await s.signals sigs (f . Right)
 
 --------------------------------------------------------------------------------
@@ -204,7 +220,7 @@ record ThreadPool where
   constructor TP
   size    : Nat
   ids     : Vect size ThreadID
-  workers : Vect (S size) EpollST
+  workers : Vect (S size) Poll
 
 stop : ThreadPool -> IO ()
 stop tp = runIO $ traverse1_ (\w => write1 w.alive Stop) tp.workers
@@ -221,16 +237,16 @@ cede p t =
 
 workSTs :
      {n : _}
-  -> (maxFiles : Nat)
+  -> (mkPoll : IO1 Poller)
   -> IOArray n (Queue Task)
   -> (stealers : IORef Nat)
   -> (k : Nat)
   -> {auto 0 lte : LTE k n}
-  -> IO (Vect k EpollST)
-workSTs maxFiles qs stealers 0     = pure []
-workSTs maxFiles qs stealers (S k) = do
-  w  <- workST (natToFinLT k) maxFiles qs stealers
-  ws <- workSTs maxFiles qs stealers k
+  -> IO (Vect k Poll)
+workSTs mkPoll qs stealers 0     = pure []
+workSTs mkPoll qs stealers (S k) = do
+  w  <- workST (natToFinLT k) mkPoll qs stealers
+  ws <- workSTs mkPoll qs stealers k
   pure (w::ws)
 
 half : Nat -> Nat
@@ -240,12 +256,12 @@ half n = cast (cast n `div` (the Integer 2))
 covering
 mkThreadPool :
      (n : Subset Nat IsSucc)
-  -> IO (ThreadPool, EventLoop EpollST)
-mkThreadPool (Element (S k) _) = do
-  qs <- marray (S k) (Queue.empty {a = Package EpollST})
-  let mfs := sysconf SC_OPEN_MAX
+  -> (mkPoll : IO1 Poller)
+  -> IO (ThreadPool, EventLoop Poll)
+mkThreadPool (Element (S k) _) mkPoll = do
+  qs <- marray (S k) (Queue.empty {a = Package Poll})
   ss <- newref (half $ S k)
-  ws <- workSTs (cast mfs) qs ss (S k)
+  ws <- workSTs mkPoll qs ss (S k)
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   let tp := TP k ts ws
   pure (tp, EL submit cede (head ws))
@@ -262,17 +278,18 @@ toIO = ignore . runElinIO
 ||| `prog` : The program to run
 export covering
 app :
-     (n    : Subset Nat IsSucc)
-  -> (sigs : List Signal)
-  -> (prog : Async EpollST [] ())
+     (n      : Subset Nat IsSucc)
+  -> (sigs   : List Signal)
+  -> (mkPoll : IO1 Poller)
+  -> (prog   : Async Poll [] ())
   -> IO ()
-app n sigs prog = do
+app n sigs mkPoll prog = do
   toIO $ sigprocmask SIG_BLOCK sigs
-  (tp,el) <- mkThreadPool n
+  (tp,el) <- mkThreadPool n mkPoll
   runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
   runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
-  traverse_ release tp.workers
+  traverse_ (\w => runIO w.poller.release) tp.workers
   usleep 100
 
 ||| Reads environment variable `IDRIS2_ASYNC_THREADS` and returns
@@ -291,15 +308,15 @@ asyncThreads = do
 ||| number of threads to use (default: 2) and cancel the running program
 ||| on receiving `SIGINT`. Other signals are not supported.
 export covering
-simpleApp : Async EpollST [] () -> IO ()
-simpleApp prog = do
-  n <- asyncThreads
-  app n [SIGINT] cprog
-
-  where
-    cprog : Async EpollST [] ()
-    cprog =
-      race_
-        [ prog
-        , dropErrs {es = [Errno]} $ onSignal SIGINT (pure ())
-        ]
+simpleApp : Async Poll [] () -> IO ()
+-- simpleApp prog = do
+--   n <- asyncThreads
+--   app n [SIGINT] cprog
+-- 
+--   where
+--     cprog : Async EpollST [] ()
+--     cprog =
+--       race_
+--         [ prog
+--         , dropErrs {es = [Errno]} $ onSignal SIGINT (pure ())
+--         ]

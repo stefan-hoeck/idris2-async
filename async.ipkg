@@ -20,6 +20,8 @@ modules = IO.Async
         , IO.Async.Util
 
         , IO.Async.Loop
+        , IO.Async.Loop.Poll
+        , IO.Async.Loop.PollH
         , IO.Async.Loop.SignalH
         , IO.Async.Loop.SignalST
         , IO.Async.Loop.Sync
