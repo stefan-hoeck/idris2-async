@@ -4,6 +4,7 @@ import Control.Monad.Resource
 import Data.Array
 import Data.Array.Mutable
 import Data.Linear.Deferred
+import Data.Linear.Unique
 import Data.Maybe
 import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Loop
@@ -67,6 +68,14 @@ Resource (Async e) (Fiber es a) where
 -- Spawning Fibers
 --------------------------------------------------------------------------------
 
+||| Like `primAsync` but does not provide a hook for canceling.
+export
+primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
+primAsync_ f =
+  primAsync $ \cb,t =>
+    let _ # t := f cb t
+     in dummy # t
+
 ||| Awaits the completion of a `Once a`.
 export %inline
 awaitOnce : Once World a -> Async e es a
@@ -75,7 +84,11 @@ awaitOnce o = primAsync $ \cb => observeOnce1 o (cb . Right)
 ||| Awaits the completion of a `Deferred a`.
 export %inline
 await : Deferred World a -> Async e es a
-await d = primAsync $ \cb => observeDeferred1 d (cb . Right)
+await d = do
+  tok <- token
+  guarantee
+    (primAsync_ $ \cb => observeDeferred1 d tok (cb . Right))
+    (unobserveDeferred d tok)
 
 ||| A low-level primitive for racing the evaluation of two fibers that returns the [[Outcome]]
 ||| of the winner and the [[Fiber]] of the loser. The winner of the race is considered to be
@@ -347,18 +360,6 @@ parseq xs =
 export %inline
 parTraverse : (a -> Async e es b) -> List a -> Async e es (Maybe $ List b)
 parTraverse f = parseq . map f
-
---------------------------------------------------------------------------------
--- Async Utilitis
---------------------------------------------------------------------------------
-
-||| Like `primAsync` but does not provide a hook for canceling.
-export
-primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
-primAsync_ f =
-  primAsync $ \cb,t =>
-    let _ # t := f cb t
-     in dummy # t
 
 --------------------------------------------------------------------------------
 -- Sleeping and Timed Execution
