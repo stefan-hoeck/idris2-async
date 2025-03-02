@@ -15,7 +15,7 @@ import IO.Async.Internal.Ref
 import IO.Async.Loop.Poller
 import IO.Async.Loop.SignalST
 import IO.Async.Loop.TimerST
-import IO.Async.Loop.ThreadPool
+import IO.Async.Loop.Posix
 import IO.Async.Signal
 
 import public IO.Async
@@ -134,7 +134,7 @@ parameters (p         : Epoll)
   cleanup v t =
     let _ # t := mod1 p.waiting pred t
         _ # t := AC.set p.handles v hdummy t
-     in io1 (ctl Del) t
+     in e1ToF1 (ctl Del) t
 
   -- invokes `cleanup` before running the file handle, and closes
   -- the file descriptor in case `autoClose` is set to `True`.
