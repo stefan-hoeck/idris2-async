@@ -22,11 +22,11 @@ module README
 
 import Data.DPair
 import Data.List
-import IO.Async.Loop.Epoll
+import IO.Async.Loop.Poller
+import IO.Async.Loop.ThreadPool
 import IO.Async.Signal
 import IO.Async.Posix
 import System
-import System.Linux.Signalfd
 import System.Posix.File
 
 %default total
@@ -113,7 +113,7 @@ used to run our computations to provide the `TimerH` capability.
 Let's try and run the two countdowns sequentially:
 
 ```idris
-countSequentially : Async EpollST [Errno] ()
+countSequentially : Async Poll [Errno] ()
 countSequentially = do
   stdoutLn "Sequential countdown:"
   countSeconds 2
@@ -256,7 +256,7 @@ fibo 0         = 1
 fibo 1         = 1
 fibo (S $ S k) = fibo k + fibo (S k)
 
-sumFibos : Nat -> Nat -> Async EpollST [Errno] ()
+sumFibos : Nat -> Nat -> Async Poll [Errno] ()
 sumFibos nr fib = do
   vs <- parTraverse (\n => lazy (fibo n)) (replicate nr fib)
   printLn (maybe 0 sum vs)
@@ -338,13 +338,13 @@ large enough to take hundreds of milliseconds at the least. In addition,
 we print ever result to get an idea of the runtime behavior:
 
 ```idris
-sumVisFibos : Nat -> Nat -> Async EpollST [Errno] ()
+sumVisFibos : Nat -> Nat -> Async Poll [Errno] ()
 sumVisFibos nr fib = do
   vs <- parTraverse visFibo (replicate nr fib)
   printLn (maybe 0 sum vs)
 
   where
-    visFibo : Nat -> Async EpollST [Errno] Nat
+    visFibo : Nat -> Async Poll [Errno] Nat
     visFibo n = lazy (fibo n) >>= \x => printLn x $> x
 ```
 
@@ -375,7 +375,7 @@ loop from `IO.Async.Loop.Epoll` is used to run this. This makes use of
 
 ```idris
 covering
-act : List String -> Async EpollST [Errno] ()
+act : List String -> Async Poll [Errno] ()
 act ("par"   :: _)    = countParallel
 act ("par2"  :: _)    = countParallel2
 act ("race"  :: _)    = raceParallel
@@ -390,7 +390,7 @@ act _                 = countSequentially
 -- `sigs` is used to block the default handling of the listed signals.
 covering
 run : (threads : Subset Nat IsSucc) -> List String -> IO ()
-run threads args = app threads sigs $ handle handlers (act args)
+run threads args = app threads sigs posixPoller $ handle handlers (act args)
   where
     sigs : List Signal
     sigs = case args of
