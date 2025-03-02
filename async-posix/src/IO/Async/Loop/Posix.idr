@@ -7,7 +7,7 @@
 ||| Each thread is responsible for scheduling and running an arbitrary number
 ||| of `Fiber`s, as well as taking care of registered timers, signal handlers,
 ||| and file polling.
-module IO.Async.Loop.ThreadPool
+module IO.Async.Loop.Posix
 
 import public Data.Nat
 import public IO.Async

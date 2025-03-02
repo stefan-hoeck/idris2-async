@@ -7,25 +7,16 @@ depends = base >= 0.7.0
         , array
         , containers
         , elin
-        , posix
         , quantifiers-extra
 
 modules = IO.Async
         , IO.Async.BQueue
-        , IO.Async.File
-        , IO.Async.Posix
         , IO.Async.Semaphore
-        , IO.Async.Signal
         , IO.Async.Type
         , IO.Async.Util
 
         , IO.Async.Loop
-        , IO.Async.Loop.Poller
-        , IO.Async.Loop.PollH
-        , IO.Async.Loop.SignalH
-        , IO.Async.Loop.SignalST
         , IO.Async.Loop.Sync
-        , IO.Async.Loop.ThreadPool
         , IO.Async.Loop.TimerH
         , IO.Async.Loop.TimerST
 

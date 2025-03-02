@@ -9,7 +9,6 @@ import Test.Async.Spec.TestEnv
 import Test.Async.Spec.TestResult
 import Text.Show.Diff
 import Text.Show.Pretty
-import System.Posix.Errno
 
 %default total
 
@@ -61,7 +60,7 @@ export %inline
 (===) x y = diff x (==) y
 
 export covering
-assert : Show a => Eq a => Async SyncST [Errno] a -> (expected : a) -> IO TestResult
+assert : Show a => Eq a => Async SyncST [String] a -> (expected : a) -> IO TestResult
 assert as exp = do
   runAsyncBlocking as >>= \case
     Error (Here x) => failWith Nothing "Computation failed with error \{x}"

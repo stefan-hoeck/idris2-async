@@ -3,7 +3,7 @@ version = 0.1.0
 authors = "stefan-hoeck"
 
 depends = base >= 0.7.0
-        , async
+        , async-posix
 
 modules = README
 
