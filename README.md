@@ -1,4 +1,4 @@
-# idris2-async: Asynchronous computations in Idris2
+# An asynchronous runtime for Idris2
 
 This is a library for running cancelable asynchronous computations
 with proper error handling in Idris2. Depending on the backend you
@@ -12,7 +12,8 @@ It is recommended to use [pack](https://github.com/stefan-hoeck/idris2-pack)
 for building and running the example applications:
 
 ```sh
-pack run async-docs [args]
+pack install-app async-docs
+async-docs [args]
 ```
 
 Before we start, let's import a couple of modules:
@@ -37,10 +38,10 @@ import System.Posix.File
 This library provides a new data type `Async e es a` for describing
 cancelable, asynchronous computations that can fail with one of the errors
 listed in `es` and yield a result of type `a` if all goes well. Asynchronous
-computations need to be run on an `EventLoop e`, which provides an environment
+computations need to be run on an event loop, which provides an environment
 of type `e`. This environment can make additional capabilities available.
 For instance, it can allow us to register timers, signal handlers, or
-listeners for data streams (such as pipes or sockets).
+provide non-blocking I/O for reading data streams such as pipes or sockets.
 
 Before we look at a first example, we need to get our terminology straight.
 
@@ -69,9 +70,29 @@ Before we look at a first example, we need to get our terminology straight.
 * fiber: A lightweight computational thread (sometimes also called a *green thread*)
   on which effectful computations run sequentially. Unlike operating
   system threads, fibers are lightweight and not a scarce resource.
-* semantic block: A fiber is said to be *semantically blocked*, if
+  Whenever we want to run several effectful computations concurrently,
+  we spawn a new fiber for each of them.
+* fiber blocking: A fiber is said to be *blocked*, if
   its sequence of computations has (possibly temporarily) come to a halt
   without actually blocking the operating system thread it runs on.
+  In a perfect world, we always want to get fiber blocking, that is, we try
+  to avoid blocking one of the precious operating system threads at
+  all cost. We therefore need to be careful when wrapping arbitrary
+  I/O calls in the `Async` monad. For instance, a call to `Prelude.getLine`
+  will indefinitely block the current thread until it can read a line
+  of text from standard input. On the other hand, a call to
+  `IO.Async.Posix.readnb Stdin` will block the current *fiber*
+  until a chunk of bytes can be read from standard input *without*
+  blocking the thread the fiber runs on. This means, that on a
+  thread pool with four operating system threads we can at most
+  use four blocking I/O calls before all threads are blocked and the
+  application comes to a halt. With non-blocking I/O such as `readnb`,
+  we can literally wait on thousands of file descriptors at the same time,
+  and the application will still be running and ready for more.
+  The same goes for calls to `System.sleep`, which will block the
+  current operating system thread for the given number of seconds, while
+  a call to `IO.Async.Util.sleep` will block the current *fiber*
+  for the given duration.
 
 In order to demonstrate some of this library's capabilities,
 we define two countdowns: One for counting down seconds,
