@@ -27,7 +27,6 @@ import IO.Async.Loop.ThreadPool
 import IO.Async.Signal
 import IO.Async.Posix
 import System
-import System.Linux.Signalfd
 import System.Posix.File
 
 %default total
