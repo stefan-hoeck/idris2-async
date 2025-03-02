@@ -6,6 +6,10 @@ import Example.CH4.Copy
 import Example.CH4.CopyWithHoles
 import Example.CH4.Seek
 
+import Example.CH63.Poll
+
+import IO.Async.Loop.Poller
+
 import Profile.Alloc
 import Profile.Bind
 import Profile.ChainedSpawn
@@ -37,6 +41,7 @@ act = do
     "copy"                    :: t => Copy.prog t
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
+    "poll"                    :: t => Poll.prog t
     "profile-alloc"           :: t => Profile.Alloc.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
     "profile-chained-spawn"   :: t => Profile.ChainedSpawn.prog t
@@ -59,9 +64,9 @@ main = do
     False => simpleApp $ handle handlers act
     True  => do
       n <- asyncThreads
-      app n [] (handle handlers act)
+      app n [] posixPoller (handle handlers act)
   exitSuccess
 
   where
-    handlers : All (Handler () EpollST) [Errno,ArgErr]
+    handlers : All (Handler () Poll) [Errno,ArgErr]
     handlers = [prettyOut,prettyOut]
