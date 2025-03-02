@@ -1,4 +1,4 @@
-# idris2-async: Asynchronous computations in Idris2
+# An asynchronous runtime for Idris2
 
 This is a library for running cancelable asynchronous computations
 with proper error handling in Idris2. Depending on the backend you
@@ -12,7 +12,8 @@ It is recommended to use [pack](https://github.com/stefan-hoeck/idris2-pack)
 for building and running the example applications:
 
 ```sh
-pack run async-docs [args]
+pack install-app async-docs
+async-docs [args]
 ```
 
 Before we start, let's import a couple of modules:
@@ -37,10 +38,10 @@ import System.Posix.File
 This library provides a new data type `Async e es a` for describing
 cancelable, asynchronous computations that can fail with one of the errors
 listed in `es` and yield a result of type `a` if all goes well. Asynchronous
-computations need to be run on an `EventLoop e`, which provides an environment
+computations need to be run on an event loop, which provides an environment
 of type `e`. This environment can make additional capabilities available.
 For instance, it can allow us to register timers, signal handlers, or
-listeners for data streams (such as pipes or sockets).
+provide non-blocking I/O for reading data streams such as pipes or sockets.
 
 Before we look at a first example, we need to get our terminology straight.
 
@@ -69,9 +70,29 @@ Before we look at a first example, we need to get our terminology straight.
 * fiber: A lightweight computational thread (sometimes also called a *green thread*)
   on which effectful computations run sequentially. Unlike operating
   system threads, fibers are lightweight and not a scarce resource.
-* semantic block: A fiber is said to be *semantically blocked*, if
+  Whenever we want to run several effectful computations concurrently,
+  we spawn a new fiber for each of them.
+* fiber blocking: A fiber is said to be *blocked*, if
   its sequence of computations has (possibly temporarily) come to a halt
   without actually blocking the operating system thread it runs on.
+  In a perfect world, we always want to get fiber blocking, that is, we try
+  to avoid blocking one of the precious operating system threads at
+  all cost. We therefore need to be careful when wrapping arbitrary
+  I/O calls in the `Async` monad. For instance, a call to `Prelude.getLine`
+  will indefinitely block the current thread until it can read a line
+  of text from standard input. On the other hand, a call to
+  `IO.Async.Posix.readnb Stdin` will block the current *fiber*
+  until a chunk of bytes can be read from standard input *without*
+  blocking the thread the fiber runs on. This means, that on a
+  thread pool with four operating system threads we can at most
+  use four blocking I/O calls before all threads are blocked and the
+  application comes to a halt. With non-blocking I/O such as `readnb`,
+  we can literally wait on thousands of file descriptors at the same time,
+  and the application will still be running and ready for more.
+  The same goes for calls to `System.sleep`, which will block the
+  current operating system thread for the given number of seconds, while
+  a call to `IO.Async.Util.sleep` will block the current *fiber*
+  for the given duration.
 
 In order to demonstrate some of this library's capabilities,
 we define two countdowns: One for counting down seconds,
@@ -102,12 +123,12 @@ and it will only proceed to the next computation
 when the current one has finished with a result.
 
 Note, however, that in the examples above there is not blocking of
-an operating system thread, even though we call `sleep`. I will explain this in
+operating system threads, even though we call `sleep`. I will explain this in
 greater detail later when we talk about `Fiber`s, but for now suffice
 to say that the `sleep` used above (from module `IO.Async.Util`)
 is more powerful than `System.sleep` from the base library although
 they semantically do the same thing: They stop a sequence of computations
-for a predefined amount of time. Note also, that we need the `EventLoop`
+for a predefined amount of time. Note also, that we need the event loop
 used to run our computations to provide the `TimerH` capability.
 
 Let's try and run the two countdowns sequentially:
@@ -124,7 +145,7 @@ You can try this example by running `main` with the `"seq"` command-line
 argument:
 
 ```sh
-> pack run async-docs seq
+> async-docs seq
 Sequential countdown:
 2 s left
 1 s left
@@ -171,7 +192,7 @@ system thread, and other computations could still run concurrently on the
 current thread.
 
 ```sh
-> pack run async-docs par
+> async-docs par
 Concurrent countdown
 1000 ms left
 2 s left
@@ -256,7 +277,7 @@ fibo 0         = 1
 fibo 1         = 1
 fibo (S $ S k) = fibo k + fibo (S k)
 
-sumFibos : Nat -> Nat -> Async Poll [Errno] ()
+sumFibos : Nat -> Nat -> Async e es ()
 sumFibos nr fib = do
   vs <- parTraverse (\n => lazy (fibo n)) (replicate nr fib)
   printLn (maybe 0 sum vs)
@@ -265,7 +286,7 @@ sumFibos nr fib = do
 You can try this by running the example application like so:
 
 ```sh
-> pack run async-docs fibo 1000 20
+> async-docs fibo 1000 20
 10946000
 ```
 
@@ -273,8 +294,8 @@ The first numeric argument is the number of concurrent computations to
 run (and thus, the number of fibers that will be created), the second
 tells the application what Fibonacci number to compute. If you feel
 adventurous, try increasing the number of fibers to one million.
-This will undoubtedly consume quite a bit of memory and take more
-than a minute to terminate, but terminate it will. It would be
+This will undoubtedly consume quite a bit of memory and take up
+to a minute to terminate, but terminate it will. It would be
 unthinkable to create that number of operating system threads!
 
 However, the example above is not a typical use case for this library.
@@ -284,7 +305,7 @@ with a more typical use case: Running a large number of timers in
 parallel. In a real application, these could be fibers trying to
 read from or write to different sockets. We do not want any system
 thread to be blocked in such a scenario since we are just waiting for
-an event to occur. As such, we want to be able to run *a lot* such
+an event to occur. As such, we want to be able to run *a lot* of these
 computations in parallel:
 
 ```idris
@@ -301,7 +322,7 @@ sleepMany (S k) = ignore $ parTraverse restFiber [0 .. cast k]
 You can try this by running the application like so:
 
 ```sh
-> pack run async-docs sleep 200
+> async-docs sleep 200
 fiber 0 done
 ...
 ```
@@ -321,12 +342,15 @@ The answer to that depends on the backend we use. This example
 application is supposed to be run on one of Idris's Scheme backends,
 and can thus make use of more than one physical core. The core function for
 running an `Async` computation is `IO.Async.Type.runAsyncWith`, which
-takes an `EventLoop e` as its first argument.
+takes an `EventLoop e` as its first argument. Typically an implementation
+of `EventLoop e` comes with its own convenience functions for
+starting the loop and running computations.
 
 An `EventLoop`'s main functionality is to provide function
-`spawn`, which allows us to enqueue an arbitrary `PrimIO` action that
+`spawn`, which allows us to enqueue an arbitrary `IO1` action (this is
+like `PrimIO` but comes from the *ref1* library) that
 will then be processed by the execution context. One implementation
-of this type is provided in module `IO.Async.Loop.Epoll`, which
+of this type is provided in module `IO.Async.Loop.ThreadPool`, which
 uses a fixed-size pool of operating system
 threads to process the enqueued `IO` actions. If the number of
 threads is greater than one, we get true parallelism when processing
@@ -355,7 +379,7 @@ default is to use four threads):
 
 ```sh
 export IDRIS2_ASYNC_THREADS="2"
-pack run async-docs vis_fibo 10 42
+async-docs vis_fibo 10 42
 ```
 
 With the arguments shown above, you will probably note
@@ -370,7 +394,7 @@ the next bunch of computations start.
 
 This final sections only shows the `main` functions and a few utilities
 used to run the examples in this introduction. Currently, the event
-loop from `IO.Async.Loop.Epoll` is used to run this. This makes use of
+loop from `IO.Async.Loop.ThreadPool` is used to run this. This makes use of
 `epoll` internally, which is only available under Linux.
 
 ```idris
