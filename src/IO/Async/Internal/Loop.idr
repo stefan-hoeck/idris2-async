@@ -6,7 +6,6 @@ import IO.Async.Internal.Concurrent
 import IO.Async.Internal.Ref
 import System.Clock
 import System
-import System.Posix.Errno
 
 %default total
 
@@ -25,13 +24,6 @@ data Work : Type where
 export
 dummy : IO1 ()
 dummy = \t => () # t
-
-export %inline
-io1 : E1 World [Errno] () -> IO1 ()
-io1 act t =
-  case act t of
-    R _ t => () # t
-    E _ t => () # t
 
 ||| `IO1` version of `die`
 export %inline

@@ -24,7 +24,7 @@ module README
 import Data.DPair
 import Data.List
 import IO.Async.Loop.Poller
-import IO.Async.Loop.ThreadPool
+import IO.Async.Loop.Posix
 import IO.Async.Signal
 import IO.Async.Posix
 import System

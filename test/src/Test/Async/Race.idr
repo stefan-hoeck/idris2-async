@@ -1,6 +1,5 @@
 module Test.Async.Race
 
-import System.Posix.Errno
 import Control.Monad.MCancel
 import Derive.Prelude
 import Test.Async.Spec
@@ -16,11 +15,11 @@ data Event : Type where
   Canceled : Nat -> Event
   None     : Event
   RNat     : Nat -> Event
-  RErr     : Errno -> Event
+  RErr     : String -> Event
 
 %runElab derive "Event" [Show,Eq]
 
-toEvent : Outcome [Errno] (Maybe $ Either Nat Nat) -> Event
+toEvent : Outcome [String] (Maybe $ Either Nat Nat) -> Event
 toEvent (Succeeded Nothing)          = None
 toEvent (Succeeded (Just (Left x)))  = RNat x
 toEvent (Succeeded (Just (Right x))) = RNat x
@@ -54,14 +53,14 @@ parameters {auto ref : IORef (SnocList Event)}
   rce :
        List (Nat -> Event)
     -> List (Nat -> Event)
-    -> Async e [Errno] (Maybe $ Either Nat Nat)
+    -> Async e [String] (Maybe $ Either Nat Nat)
   rce xs ys =
     race2
       (onCncl 1 $ events 1 xs)
       (onCncl 2 $ events 2 ys)
 
 run :
-     (IORef (SnocList Event) => Async e [Errno] (Maybe $ Either Nat Nat))
+     (IORef (SnocList Event) => Async e [String] (Maybe $ Either Nat Nat))
   -> Async e es (List Event)
 run f = do
   ref <- newref [<]

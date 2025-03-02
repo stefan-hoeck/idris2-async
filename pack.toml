@@ -4,6 +4,11 @@ path = "."
 ipkg = "async.ipkg"
 test = "test/test.ipkg"
 
+[custom.all.async-posix]
+type = "local"
+path = "async-posix"
+ipkg = "async-posix.ipkg"
+
 [custom.all.async-epoll]
 type = "local"
 path = "async-epoll"

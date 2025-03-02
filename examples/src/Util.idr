@@ -2,7 +2,7 @@ module Util
 
 import public Data.C.Ptr
 import public IO.Async
-import public IO.Async.Loop.ThreadPool
+import public IO.Async.Loop.Posix
 import public IO.Async.File
 import public IO.Async.Posix
 

@@ -30,7 +30,7 @@ square : Nat -> Nat
 square x = x * x
 
 covering
-instrs : String -> Async SyncST [Errno] Nat -> List FlatSpecInstr
+instrs : String -> Async SyncST [String] Nat -> List FlatSpecInstr
 instrs str act =
   [ Desc str `should` "be returned unchanged" `at` (assert act val)
   ,   it `should` "be returned unchanged after mapping with id" `at`
