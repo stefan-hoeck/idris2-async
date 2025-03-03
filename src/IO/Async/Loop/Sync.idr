@@ -1,11 +1,13 @@
 module IO.Async.Loop.Sync
 
+import Data.Linear.Traverse1
+import Data.So
 import Data.SortedMap
 import public IO.Async.Loop
 import IO.Async.Loop.TimerH
-import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import System.Clock
+import System
 
 %default total
 
@@ -71,11 +73,18 @@ checkQueue s t =
         [] => () # t
         as => run s as t
 
+notCanceled : SnocList Timed -> List Timed -> IO1 (List Timed)
+notCanceled sx []        t = (sx <>> []) # t
+notCanceled sx (x :: xs) t =
+  case read1 x.canceled t of
+    True  # t => notCanceled sx xs t
+    False # t => notCanceled (sx :< x) xs t
+
 -- Check if we have any timers that are due and run them
 checkTimers s t =
   let ts # t      := read1 s.timers t
       Just (c,ts) := leftMost ts | Nothing => checkQueue s t
-   in case nonCanceled canceled ts t of
+   in case notCanceled [<] ts t of
         []  # t => -- all timers have been canceled. remove them and check for more
           let _ # t := mod1 s.timers (delete c) t
            in checkTimers s t
@@ -87,8 +96,15 @@ checkTimers s t =
                 -- the timers are due. run them and check for more
                 True  =>
                   let _ # t := mod1 s.timers (delete c) t
-                      _ # t := runAll runTimer ts2 t
+                      _ # t := traverse1_ runTimer ts2 t
                    in checkTimers s t
+
+doSleep : Clock Duration -> IO1 ()
+doSleep c t =
+  let v := cast {to = Int} (toNano c `div` 1000)
+   in case choose (v >= 0) of
+        Left x  => ioToF1 (usleep v) t
+        Right x => () # t
 
 sleep s c t =
   let sa # t := read1 s.queue t

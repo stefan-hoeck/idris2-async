@@ -2,8 +2,8 @@ module IO.Async.Loop.TimerST
 
 import Data.SortedMap
 import Data.Linear.Ref1
+import Data.Linear.Traverse1
 import IO.Async.Loop
-import IO.Async.Internal.Loop
 import System.Clock
 
 %default total
@@ -70,7 +70,7 @@ parameters (ti : Timer)
     let ns  # t := nanos t
         end     := ns + toNano dur
      in case end <= ns of
-          True  => let _ # t := act t in dummy # t
+          True  => let _ # t := act t in unit1 # t
           False =>
             let ix # t := casupdate1 ti.ref (schedule_ end act) t
              in casmod1 ti.ref (drop_ end ix) # t
@@ -80,7 +80,7 @@ parameters (ti : Timer)
   runDue now t =
     case casupdate1 ti.ref (nextDue now) t of
       Right ps # t =>
-       let _ # t := runAll snd ps t
+       let _ # t := traverse1_ snd ps t
         in runDue (assert_smaller now now) t
       Left rem # t => rem # t
 

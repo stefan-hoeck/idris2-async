@@ -1,8 +1,8 @@
 module IO.Async.Loop.SignalST
 
 import Data.Linear.Ref1
+import Data.Linear.Traverse1
 import Data.SortedMap
-import IO.Async.Internal.Loop
 import IO.Async.Loop
 import System.Posix.Signal.Prim
 
@@ -88,4 +88,4 @@ parameters (si : Sighandler)
                   Nothing => () # t
                   Just hs =>
                     let _ # t := write1 si.ref ({map $= delete inf.signal} st) t
-                     in runAll (\h => snd h inf) hs t 
+                     in traverse1_ (\h => snd h inf) hs t 

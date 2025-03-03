@@ -10,7 +10,6 @@ import Data.Linear.Traverse1
 import Data.Queue
 import Data.Vect
 
-import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Loop.Poller
 import IO.Async.Loop.SignalST
@@ -153,7 +152,7 @@ parameters (p         : Epoll)
   abrt res t =
     let _ # t := cb res t
         _ # t := closefd t
-     in dummy # t
+     in unit1 # t
 
   -- cancelation hook: like `act` but without invoking the callback
   %inline

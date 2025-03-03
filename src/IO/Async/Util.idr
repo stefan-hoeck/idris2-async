@@ -6,8 +6,6 @@ import Data.Array.Mutable
 import Data.Linear.Deferred
 import Data.Linear.Unique
 import Data.Maybe
-import IO.Async.Internal.Concurrent
-import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Loop.Sync
 import IO.Async.Loop.TimerH
@@ -74,7 +72,7 @@ primAsync_ : ((Result es a -> IO1 ()) -> IO1 ()) -> Async e es a
 primAsync_ f =
   primAsync $ \cb,t =>
     let _ # t := f cb t
-     in dummy # t
+     in unit1 # t
 
 ||| Awaits the completion of a `Once a`.
 export %inline

@@ -2,7 +2,6 @@ module IO.Async.Semaphore
 
 import Data.Linear.Ref1
 import Data.Nat
-import IO.Async.Internal.Loop
 import IO.Async.Loop
 import IO.Async.Type
 
@@ -50,8 +49,8 @@ release (S ref) =
     upd (Obs n cb) =
       case pred n of
         0 => (Ini 0, cb)
-        k => (Obs k cb, dummy)
-    upd (Ini n) = (Ini $ pred n, dummy)
+        k => (Obs k cb, unit1)
+    upd (Ini n) = (Ini $ pred n, unit1)
 
 ||| Atomically reduces the internal counter of the semaphore to zero.
 export
@@ -64,7 +63,7 @@ releaseAll (S ref) =
   where
     upd : ST -> (ST, IO1 ())
     upd (Obs n cb) = (Ini 0, cb)
-    upd _          = (Ini 0, dummy)
+    upd _          = (Ini 0, unit1)
 
 ||| Waits (possibly by semantically blocking the fiber)
 ||| until the semaphore has been released down to zero.
@@ -81,6 +80,6 @@ await (S ref) =
 
   where
     upd : IO1 () -> ST -> (ST, IO1 (IO1 ()))
-    upd cb (Ini 0) = (Ini 0, \t => let _ # t := cb t in dummy # t)
+    upd cb (Ini 0) = (Ini 0, \t => let _ # t := cb t in unit1 # t)
     upd cb (Ini n) = (Obs n cb, (unobs ref #))
-    upd cb x       = (x, (dummy #))
+    upd cb x       = (x, (unit1 #))
