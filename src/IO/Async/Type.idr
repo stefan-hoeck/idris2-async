@@ -2,8 +2,6 @@ module IO.Async.Type
 
 import Data.Nat
 import IO.Async.Loop
-import IO.Async.Internal.Concurrent
-import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import Data.Linear.Unique
 
@@ -198,7 +196,7 @@ stopObserving n fbr = casmod1 fbr.st {cbs $= filter ((n /=) . fst)}
 observe : FiberImpl e es a -> Callback es a -> IO1 (IO1 ())
 observe fbr cb t =
   case casupdate1 fbr.st observeAct t of
-    Left  act # t => let _ # t := act t in dummy # t
+    Left  act # t => let _ # t := act t in unit1 # t
     Right act # t => act # t
   where
     observeAct : FiberST es a -> (FiberST es a, (Either (IO1 ()) (IO1 ())))
@@ -239,9 +237,9 @@ doCancel fbr t =
     cancelAct : FiberST es a -> (FiberST es a, IO1 ())
     cancelAct s =
       case s.state of
-        Done _        => (s,dummy)
+        Done _        => (s,unit1)
         Suspended act => ({canceled := True, state := Running} s, act)
-        _             => ({canceled := True} s, dummy)
+        _             => ({canceled := True} s, unit1)
 
 -- Suspend the fiber because it is waiting for the result of
 -- an asynchronous computation. If the asynchronous computation
@@ -257,7 +255,7 @@ suspend fbr cont t =
     suspendAct s =
       case s.state of
         HasResult => ({state := Running} s, cont) 
-        _         => ({state := Suspended cont} s, dummy) 
+        _         => ({state := Suspended cont} s, unit1) 
 
 -- Resumes the computation of this fiber because the result from
 -- an asynchronous computation is ready. If this is invoked while
@@ -277,9 +275,9 @@ resume fbr t =
     resumeAct s =
       case s.state of
         Suspended c => ({state := Running} s, c)
-        Running     => ({state := HasResult} s, dummy) 
-        HasResult   => (s, dummy)
-        Done _      => (s, dummy)
+        Running     => ({state := HasResult} s, unit1) 
+        HasResult   => (s, unit1)
+        Done _      => (s, unit1)
 
 export
 toFiber : FiberImpl e es a -> Fiber es a

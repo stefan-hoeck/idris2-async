@@ -24,7 +24,6 @@ import Data.Linear.Traverse1
 import Data.Queue
 import Data.Vect
 
-import IO.Async.Internal.Loop
 import IO.Async.Internal.Ref
 import IO.Async.Loop.Poller
 import IO.Async.Loop.SignalST
@@ -56,7 +55,7 @@ record Poll where
   me       : Fin size
 
   ||| Reference indicating whether the pool is still alive
-  alive    : IORef Alive
+  alive    : IORef Bool
 
   ||| Recently ceded work package. Since switching threads is
   ||| a costly operation, we want to prevent this from being
@@ -95,7 +94,7 @@ workST :
   -> IO Poll
 workST me mkPoll queues stealers =
   runIO $ \t =>
-    let alive # t := ref1 Run t
+    let alive # t := ref1 True t
         ceded # t := ref1 Nothing t
         poll  # t := mkPoll t 
         tim   # t := TimerST.timer t
@@ -163,8 +162,8 @@ parameters (s : Poll)
   loop : Nat -> IO1 ()
   loop cpoll t =
     case read1 s.alive t of
-      Stop # t => () # t
-      Run  # t => case cpoll of
+      False # t => () # t
+      True  # t => case cpoll of
         0   =>
           let _ # t := s.poller.poll t
               _ # t := checkSignals s.signals t
@@ -178,11 +177,6 @@ parameters (s : Poll)
                      _ # t := s.poller.pollWait (pollDuration r) t
                   in loop POLL_ITER t
 
--- release : EpollST -> IO ()
--- release s = do
---   free s.poller.events
---   fromPrim (close' s.poller.epoll)
--- 
 --------------------------------------------------------------------------------
 -- Interfaces
 --------------------------------------------------------------------------------
@@ -216,7 +210,7 @@ record ThreadPool where
   workers : Vect (S size) Poll
 
 stop : ThreadPool -> IO ()
-stop tp = runIO $ traverse1_ (\w => write1 w.alive Stop) tp.workers
+stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 
 submit : Task -> IO1 ()
 submit p t =
