@@ -57,7 +57,7 @@ parameters {auto has : Has Errno es}
   ||| blocking pipes and sockets.
   export
   writenb : ToBuf r => r -> Async e es Bits32
-  writenb v = onEvent POLLOUT (write fd v)
+  writenb v = onEvent POLLOUT (ifError EAGAIN 0 $ write fd v)
 
   ||| Iteratively writes a value to a file descriptor making sure
   ||| that the whole value is written. Use this, if a single call to
