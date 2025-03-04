@@ -16,8 +16,7 @@ parameters {auto has : Has Errno es}
   export %inline
   socketnb : (d : Domain) -> SockType -> Async e es (Socket d)
   socketnb d t = do
-    sock <- socket d t
-    addFlags sock O_NONBLOCK
+    sock <- socket d (t <+> SOCK_NONBLOCK)
     pure sock
 
   ||| Listens on the given socket for incoming connections without blocking.
