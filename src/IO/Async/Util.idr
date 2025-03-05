@@ -299,7 +299,8 @@ par (h::t) =
     _                 => Nothing
 
 parstart :
-     SnocList (Fiber es a)
+     {n : _}
+  -> SnocList (Fiber es a)
   -> IOArray n (Outcome es a) 
   -> Semaphore
   -> (k : Nat)
@@ -308,7 +309,7 @@ parstart :
   -> Async e es (List $ Fiber es a)
 parstart sx arr sem (S k) (x::xs) = do
   fib <- start $ guaranteeCase x $ \case
-    Canceled => releaseAll sem
+    Canceled => releaseN sem n
     o        => runIO (setNat arr k o) >> release sem 
   parstart (sx:<fib) arr sem k xs
 parstart sx arr sem _ _ = pure (sx <>> [])
@@ -343,10 +344,10 @@ parseq : List (Async e es a) -> Async e es (Maybe $ List a)
 parseq xs =
   uncancelable $ \poll => do
     (n ** arr) <- marr (length xs)
-    sem        <- semaphore n
+    sem        <- semaphore 0
     fs         <- parstart [<] arr sem n xs
     flip guarantee (traverse_ cancel fs) $ poll $ do
-      await sem
+      acquireN sem n
       runIO (collect [<] arr n True) >>= \case
         Succeeded vs => pure (Just vs)
         Error  x     => fail x
