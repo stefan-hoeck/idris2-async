@@ -11,6 +11,7 @@ depends = base >= 0.7.0
 
 modules = IO.Async
         , IO.Async.BQueue
+        , IO.Async.Channel
         , IO.Async.Semaphore
         , IO.Async.Type
         , IO.Async.Util
