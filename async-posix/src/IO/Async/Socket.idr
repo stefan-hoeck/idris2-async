@@ -20,8 +20,6 @@ parameters {auto has : Has Errno es}
     pure sock
 
   ||| Listens on the given socket for incoming connections without blocking.
-  |||
-  |||
   export
   acceptnb : Socket d -> Async e es (Maybe $ Socket d)
   acceptnb sock = do
@@ -32,6 +30,17 @@ parameters {auto has : Has Errno es}
         peer <- accept sock
         addFlags peer O_NONBLOCK
         pure (Just peer)
+
+  ||| Connects a socket to the given address.
+  export
+  connectnb : {d : _} -> Socket d -> Addr d -> Async e es ()
+  connectnb sock addr =
+    attempt (connect {es = [Errno]} sock addr) >>= \case
+      Left (Here x) =>
+        if x == EINPROGRESS || x == EAGAIN
+           then ignore $ poll sock POLLOUT
+           else throw x
+      Right ()      => pure ()
 
   ||| Reads at most `n` bytes from a socket.
   export %inline
