@@ -80,9 +80,8 @@ sync = Sync
 
 ||| Asynchronous FFI: Wraps a callback handler into `Async`.
 |||
-||| The `Bool -> IO1 ()` action returned after registering the callback will
-||| be used for cancelation and cleanup. It is invoked with `True` in case
-||| of cancelation and `False` in case of regular cleanup.
+||| The `IO1 ()` action returned after registering the callback will
+||| be used for cancelation and cleanup.
 export %inline
 primAsync : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 primAsync = Asnc
