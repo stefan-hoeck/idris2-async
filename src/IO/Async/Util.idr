@@ -82,11 +82,7 @@ awaitOnce o = primAsync $ \cb => observeOnce1 o (cb . Right)
 ||| Awaits the completion of a `Deferred a`.
 export %inline
 await : Deferred World a -> Async e es a
-await d = do
-  tok <- token
-  guarantee
-    (primAsync_ $ \cb => observeDeferred1 d tok (cb . Right))
-    (unobserveDeferred d tok)
+await d = primAsync $ \cb => observeDeferred1 d (cb . Right)
 
 ||| A low-level primitive for racing the evaluation of two fibers that returns the [[Outcome]]
 ||| of the winner and the [[Fiber]] of the loser. The winner of the race is considered to be
