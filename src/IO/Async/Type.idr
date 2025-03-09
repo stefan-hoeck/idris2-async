@@ -281,9 +281,8 @@ resume fbr tok t =
           if tok == t2
              then ({state := Running} s, c)
              else (s, unit1)
-        Running        => ({state := HasResult tok} s, unit1) 
-        HasResult _    => (s, unit1)
         Done _         => (s, unit1)
+        _              => ({state := HasResult tok} s, unit1) 
 
 export
 toFiber : FiberImpl e es a -> Fiber es a
