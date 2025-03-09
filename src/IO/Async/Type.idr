@@ -256,7 +256,7 @@ suspend fbr tok cont ifres t =
         HasResult t2 => 
           if tok == t2
              then ({state := Running} s, ifres) 
-             else (s, unit1)
+             else ({state := Suspended tok cont} s, unit1) 
         Running      => ({state := Suspended tok cont} s, unit1) 
         _            => (s, unit1) 
 
