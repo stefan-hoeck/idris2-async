@@ -254,7 +254,8 @@ suspend fbr cont t =
     suspendAct s =
       case s.state of
         HasResult => ({state := Running} s, cont) 
-        _         => ({state := Suspended cont} s, unit1) 
+        Running   => ({state := Suspended cont} s, unit1) 
+        _         => (s, unit1) 
 
 -- Resumes the computation of this fiber because the result from
 -- an asynchronous computation is ready. If this is invoked while
