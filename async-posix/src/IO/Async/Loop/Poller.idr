@@ -115,7 +115,7 @@ parameters (p         : Posix)
   -- resets the file handle to `hdummy` and removes `fd` from the epoll set
   %inline
   cleanup : IO1 ()
-  cleanup = mod1 p.handles (delete fd)
+  cleanup = casmod1 p.handles (delete fd)
 
   -- invokes `cleanup` before running the file handle, and closes
   -- the file descriptor in case `autoClose` is set to `True`.
@@ -144,7 +144,7 @@ parameters (p         : Posix)
         -- cancelation, which might happen externally and from a different
         -- thread
         r  # t := ref1 True t
-        mp # t := mod1 p.handles (insert fd (ev, \e => once r (act e))) t
+        mp # t := casmod1 p.handles (insert fd (ev, \e => once r (act e))) t
      in once r cleanup # t
 
 ||| initialize the state of a posix-compatible poller.
