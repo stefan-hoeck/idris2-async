@@ -62,7 +62,7 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 
   -- Internal checking if asynchronous results are available.
   -- We only check after we have been notified that a result is ready.
-  Wait : IORef (Maybe $ Result es a) -> Async e es a
+  Wait : Token World -> IORef (Maybe $ Result es a) -> Async e es a
 
 --------------------------------------------------------------------------------
 -- Primitives
@@ -155,8 +155,8 @@ emptyCBs _ _ = []
 --   4) Done:      The fiber has terminated and produced the wrapped outcome.
 data FiberState : (es : List Type) -> (a : Type) -> Type where
   Running   : FiberState es a
-  Suspended : IO1 () -> FiberState es a
-  HasResult : FiberState es a
+  Suspended : Token World -> IO1 () -> FiberState es a
+  HasResult : Token World -> FiberState es a
   Done      : Outcome es a -> FiberState es a
 
 -- State of a `Fiber`
@@ -236,16 +236,16 @@ doCancel fbr t =
     cancelAct : FiberST es a -> (FiberST es a, IO1 ())
     cancelAct s =
       case s.state of
-        Done _        => (s,unit1)
-        Suspended act => ({canceled := True, state := Running} s, act)
-        _             => ({canceled := True} s, unit1)
+        Done _          => (s,unit1)
+        Suspended _ act => ({canceled := True, state := Running} s, act)
+        _               => ({canceled := True} s, unit1)
 
 -- Suspend the fiber because it is waiting for the result of
 -- an asynchronous computation. If the asynchronous computation
 -- was faster, the fiber's state will be at `HasResult` and
 -- it will immediately be resumed.
-suspend : FiberImpl e es a -> IO1 () -> IO1 ()
-suspend fbr cont t =
+suspend : FiberImpl e es a -> Token World -> IO1 () -> IO1 () -> IO1 ()
+suspend fbr tok cont ifres t =
   let act # t := casupdate1 fbr.st suspendAct t
    in act t
 
@@ -253,8 +253,12 @@ suspend fbr cont t =
     suspendAct : FiberST es a -> (FiberST es a, IO1 ())
     suspendAct s =
       case s.state of
-        HasResult => ({state := Running} s, cont) 
-        _         => ({state := Suspended cont} s, unit1) 
+        HasResult t2 => 
+          if tok == t2
+             then ({state := Running} s, ifres) 
+             else ({state := Suspended tok cont} s, unit1) 
+        Running      => ({state := Suspended tok cont} s, unit1) 
+        _            => (s, unit1) 
 
 -- Resumes the computation of this fiber because the result from
 -- an asynchronous computation is ready. If this is invoked while
@@ -264,8 +268,8 @@ suspend fbr cont t =
 --
 -- If the fiber is already `Done`, well then we are much too late
 -- and should abort silently.
-resume : FiberImpl e es a -> IO1 ()
-resume fbr t =
+resume : FiberImpl e es a -> Token World -> IO1 ()
+resume fbr tok t =
   let act # t := casupdate1 fbr.st resumeAct t
    in act t
 
@@ -273,10 +277,12 @@ resume fbr t =
     resumeAct : FiberST es a -> (FiberST es a, IO1 ())
     resumeAct s =
       case s.state of
-        Suspended c => ({state := Running} s, c)
-        Running     => ({state := HasResult} s, unit1) 
-        HasResult   => (s, unit1)
-        Done _      => (s, unit1)
+        Suspended t2 c =>
+          if tok == t2
+             then ({state := Running} s, c)
+             else (s, unit1)
+        Done _         => (s, unit1)
+        _              => ({state := HasResult tok} s, unit1) 
 
 export
 toFiber : FiberImpl e es a -> Fiber es a
@@ -422,17 +428,24 @@ parameters (limit   : Nat)
 
       Asnc f =>
         let res  # t := ref1 Nothing t
-            cncl # t := f (\r,t => let _ # t := put res r t in resume fbr t) t
-         in run el (Wait res) cm cc fbr (Hook (runIO cncl) :: st) t
+            tok  # t := token1 t
+            cncl # t := f (\r,t => let _ # t := put res r t in resume fbr tok t) t
+         in run el (Wait tok res) cm cc fbr (Hook (runIO cncl) :: st) t
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
         False => run el x cm        cc fbr st t
 
-      Wait res     =>
+      Wait tok res     =>
         case read1 res t of
           Just v  # t => run el (terminal v) cm cc fbr st t
-          Nothing # t => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) t
+          Nothing # t =>
+            suspend
+              fbr
+              tok
+              (el.spawn (Pkg fbr.env $ run el act cm cc fbr st))
+              (run el act cm cc fbr st)
+              t
 
   export covering
   runAsyncWith : EventLoop e -> Async e es a -> (Outcome es a -> IO ()) -> IO ()
