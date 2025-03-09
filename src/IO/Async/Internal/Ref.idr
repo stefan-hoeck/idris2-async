@@ -27,14 +27,6 @@ put r v =
     Nothing => Just v
     Just w  => Just w
 
-export
-modify : Ref s a -> (a -> (a,b)) -> F1 s b
-modify r f t =
-  let v1 # t := read1 r t
-      (v2,res) := f v1
-      _  # t := write1 r v2 t
-   in res # t
-
 export %inline
 enqAt : IOArray n (Queue a) -> Fin n -> a -> IO1 ()
 enqAt qs x v = casmodify qs x (`enqueue` v)

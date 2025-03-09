@@ -131,7 +131,7 @@ parameters (p         : Epoll)
   %inline
   cleanup : Fin p.maxFiles -> IO1 ()
   cleanup v t =
-    let _ # t := mod1 p.waiting pred t
+    let _ # t := casmod1 p.waiting pred t
         _ # t := AC.set p.handles v hdummy t
      in e1ToF1 (ctl Del) t
 
@@ -194,7 +194,7 @@ parameters (p         : Epoll)
              -- thread
              r # t := ref1 True t
              _ # t := AC.set p.handles v (\e => once r (act v e)) t
-             _ # t := mod1 p.waiting S t
+             _ # t := casmod1 p.waiting S t
           in once r (cleanup v) # t
       Nothing => abrt (Left EINVAL) t
 
