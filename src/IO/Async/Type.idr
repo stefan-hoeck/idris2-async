@@ -244,8 +244,8 @@ doCancel fbr t =
 -- an asynchronous computation. If the asynchronous computation
 -- was faster, the fiber's state will be at `HasResult` and
 -- it will immediately be resumed.
-suspend : FiberImpl e es a -> IO1 () -> IO1 ()
-suspend fbr cont t =
+suspend : FiberImpl e es a -> IO1 () -> IO1 () -> IO1 ()
+suspend fbr cont ifres t =
   let act # t := casupdate1 fbr.st suspendAct t
    in act t
 
@@ -253,7 +253,7 @@ suspend fbr cont t =
     suspendAct : FiberST es a -> (FiberST es a, IO1 ())
     suspendAct s =
       case s.state of
-        HasResult => ({state := Running} s, cont) 
+        HasResult => ({state := Running} s, ifres) 
         Running   => ({state := Suspended cont} s, unit1) 
         _         => (s, unit1) 
 
@@ -433,7 +433,12 @@ parameters (limit   : Nat)
       Wait res     =>
         case read1 res t of
           Just v  # t => run el (terminal v) cm cc fbr st t
-          Nothing # t => suspend fbr (el.spawn (Pkg fbr.env $ run el act cm limit fbr st)) t
+          Nothing # t =>
+            suspend
+              fbr
+              (el.spawn (Pkg fbr.env $ run el act cm cc fbr st))
+              (run el act cm cc fbr st)
+              t
 
   export covering
   runAsyncWith : EventLoop e -> Async e es a -> (Outcome es a -> IO ()) -> IO ()
