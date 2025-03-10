@@ -101,11 +101,9 @@ export
 send : Channel a -> a -> Async e es SendRes
 send (C ref) v = do
   def <- onceOf SendRes
-  act <- update ref (snd id def v)
-  act
-  -- uncancelable $ \poll => do
-  --   act <- update ref (snd poll def v)
-  --   act
+  uncancelable $ \poll => do
+    act <- update ref (snd poll def v)
+    act
 
 ||| Extracts the next value from a channel potentially blocking
 ||| the calling fiber until such a value is available.
@@ -116,11 +114,9 @@ export
 receive : Channel a -> Async e es (Maybe a)
 receive (C ref) = do
   def <- onceOf (Maybe a)
-  act <- update ref (rec id def)
-  act
-  -- uncancelable $ \poll => do
-  --   act <- update ref (rec poll def)
-  --   act
+  uncancelable $ \poll => do
+    act <- update ref (rec poll def)
+    act
 
 ||| Gracefully closes the channel: No more data can be sent
 ||| (`send` will return immedately with `Closed` from now on),
