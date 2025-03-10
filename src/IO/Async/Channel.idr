@@ -28,15 +28,15 @@ record ST a where
   open_    : Bool
 
 %inline
-rec : Poll (Async e) -> Once World (Maybe a) -> ST a -> (ST a, Async e es (Maybe a))
-rec poll def st@(S cap q ts os opn) =
+rec : Once World (Maybe a) -> ST a -> (ST a, Async e es (Maybe a))
+rec def st@(S cap q ts os opn) =
   case dequeue q of
     Just (n,q2) => case dequeue os of
       Nothing           => (S (S cap) q2 ts os opn, pure (Just n))
       Just ((x,o), os2) => (S cap (enqueue q2 x) ts os2 opn, putOnce o (sendRes opn) $> Just n)
     Nothing     => case dequeue os of
       Nothing           => case opn of
-        True  => (S cap q (Just def) os opn, poll (awaitOnce def))
+        True  => (S cap q (Just def) os opn, (awaitOnce def))
         False => (st, pure Nothing)
       Just ((x,o), os2) => (S cap q ts os2 opn, putOnce o (sendRes opn) $> Just x)
 
@@ -114,9 +114,11 @@ export
 receive : Channel a -> Async e es (Maybe a)
 receive (C ref) = do
   def <- onceOf (Maybe a)
-  uncancelable $ \poll => do
-    act <- update ref (rec poll def)
-    act
+  act <- update ref (rec def)
+  act
+  -- uncancelable $ \poll => do
+  --   act <- update ref (rec poll def)
+  --   act
 
 ||| Gracefully closes the channel: No more data can be sent
 ||| (`send` will return immedately with `Closed` from now on),
