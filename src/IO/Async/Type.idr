@@ -299,7 +299,7 @@ parameters (limit   : Nat)
         let ev # t := read1 fbr.env t
          in run el (pure ev) cm cc fbr st t
 
-      Cede        => cedeFbr el fbr (run el (pure ()) cm cc fbr st) t
+      Cede        => cedeFbr el fbr (run el (pure ()) cm limit fbr st) t
 
       Asnc f => case cm of
         -- Cancelation is currently observable, so we listen for
