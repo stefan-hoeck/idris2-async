@@ -278,7 +278,7 @@ parameters (limit   : Nat)
       Start x     =>
         let fbr2 # t := newFiber el t
             _    # t := spawnFib el fbr2 x t
-         in run el (pure $ toFiber fbr2) 0 cc fbr st t
+         in run el (pure $ toFiber fbr2) cm cc fbr st t
 
       Sync x      =>
         let r # t := ioToF1 x t
