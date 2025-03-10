@@ -1,5 +1,6 @@
 module IO.Async.Type
 
+import Debug.Trace
 import Data.Nat
 import IO.Async.Loop
 import IO.Async.Internal.Ref
@@ -320,7 +321,7 @@ parameters (limit   : Nat)
         -- hook and just register the callback.
         _ =>
           let cncl # t := f (\r => run el (terminal r) cm cc fbr st) t
-           in () # t
+           in trace "Warning: Cant cancel async operation" () # t
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
