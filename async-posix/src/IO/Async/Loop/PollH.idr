@@ -8,6 +8,7 @@ import public System.Posix.Poll.Types
 
 public export
 interface PollH a where
+  threadId : a -> Nat
   primPoll :
        a
     -> Fd

@@ -20,13 +20,6 @@ once r act t =
     True  # t => act t
     False # t => () # t
 
-export
-put : Ref s (Maybe a) -> a -> F1' s
-put r v =
-  casmod1 r $ \case
-    Nothing => Just v
-    Just w  => Just w
-
 export %inline
 enqAt : IOArray n (Queue a) -> Fin n -> a -> IO1 ()
 enqAt qs x v = casmodify qs x (`enqueue` v)

@@ -95,13 +95,11 @@ racePair :
   -> Async e fs b
   -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
 racePair x y =
-  uncancelable $ \poll => do
-    f1 <- start x
-    f2 <- start y
-    flip onCancel (cancel f1 >> cancel f2) $ poll $ primAsync $ \cb,t =>
-      let c1 # t := f1.observe_ (\o1 => cb $ Right $ Left (o1,f2)) t
-          c2 # t := f2.observe_ (\o2 => cb $ Right $ Right (f1,o2)) t
-       in (\t => let _ # t := c1 t in c2 t) # t
+  uncancelable $ \poll => Prelude.do
+    o  <- onceOf (Either (Outcome es a) (Outcome fs b))
+    f1 <- start (guaranteeCase x (putOnce o . Left))
+    f2 <- start (guaranteeCase y (putOnce o . Right))
+    bimap (,f2) (f1,) <$> onCancel (poll (awaitOnce o)) (cancel f1 >> cancel f2)
 
 ||| Awaits the completion of the bound fiber and returns its result once it completes.
 ||| 
