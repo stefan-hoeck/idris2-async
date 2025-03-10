@@ -320,7 +320,7 @@ parameters (limit   : Nat)
         -- Cancelation is currently not observable, so we ignore the cancel
         -- hook and just register the callback.
         _ =>
-          let cncl # t := f (\r => run el (terminal r) cm cc fbr st) t
+          let cncl # t := f (\r => el.spawn (Pkg fbr.env $ run el (terminal r) cm cc fbr st)) t
            -- in () # t
            in trace "Warning: Cant cancel async operation (\{show cm})" () # t
 
