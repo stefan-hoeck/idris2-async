@@ -189,6 +189,10 @@ hooks (Hook h :: t) = prepend h (hooks t)
 hooks (_ :: t)      = hooks t
 hooks []            = [Abort]
 
+observeCancel : Once World (Outcome es a) -> Nat -> FiberImpl e fs b -> IO1 (IO1 ())
+observeCancel o 0 f = observeOnce1 f.cncl (\_ => putOnce1 o Canceled)
+observeCancel _ _ _ = (unit1 #)
+
 parameters (limit   : Nat)
 
   -- Invokes runR or runC depending on if the fiber has
@@ -301,28 +305,22 @@ parameters (limit   : Nat)
 
       Cede        => cedeFbr el fbr (run el (pure ()) cm limit fbr st) t
 
-      Asnc f => case cm of
-        -- Cancelation is currently observable, so we listen for
-        -- cancelation as well as the completion of the async computation.
-        -- Both results are raced and written to a `Once`, on which we listen
-        -- to be notified about the continuation.
-        0 =>
-          let o  # t := onceOf1 (Outcome es a) t
-              c1 # t := f (putOnce1 o . toOutcome) t
-              c2 # t := observeOnce1 fbr.cncl (\_ => putOnce1 o Canceled) t
-              _  # t := observeOnce1 o (\out,t => case out of
-                          Succeeded r => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Val r) cm cc fbr st) t
-                          Error     x => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Err x) cm cc fbr st) t
-                          Canceled    => let _ # t := c1 t in el.spawn (Pkg fbr.env $ run el (pure ()) 1 cc fbr (hooks st)) t
-                        )t
-           in () # t
-
-        -- Cancelation is currently not observable, so we ignore the cancel
-        -- hook and just register the callback.
-        _ =>
-          let cncl # t := f (\r => el.spawn (Pkg fbr.env $ run el (terminal r) cm cc fbr st)) t
-           in () # t
-           -- in trace "Warning: Cant cancel async operation (\{show cm})" () # t
+      Asnc f =>
+        let o  # t := onceOf1 (Outcome es a) t
+            c1 # t := f (putOnce1 o . toOutcome) t
+            c2 # t := observeCancel o cm fbr t
+         in case peekOnce1 o t of
+              Nothing  # t =>
+                let _ # t := observeOnce1 o (\out,t => case out of
+                               Succeeded r => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Val r) cm cc fbr st) t
+                               Error     x => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Err x) cm cc fbr st) t
+                               Canceled    => let _ # t := c1 t in el.spawn (Pkg fbr.env $ run el (pure ()) 1 cc fbr (hooks st)) t
+                             ) t
+                 in () # t
+              Just out # t => case out of
+                Succeeded r => let _ # t := c2 t in run el (Val r) cm cc fbr st t
+                Error     x => let _ # t := c2 t in run el (Err x) cm cc fbr st t
+                Canceled    => let _ # t := c1 t in run el (pure ()) 1 cc fbr (hooks st) t
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
