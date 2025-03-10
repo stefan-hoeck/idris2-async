@@ -193,6 +193,7 @@ parameters (s : Poll)
 
 export %inline
 PollH Poll where
+  threadId s = cast s.me
   primPoll s = s.poller.pollFile
 
 export %inline
