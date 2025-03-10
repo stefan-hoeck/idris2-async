@@ -28,15 +28,15 @@ record ST a where
   open_    : Bool
 
 %inline
-rec : Once World (Maybe a) -> ST a -> (ST a, Async e es (Maybe a))
-rec def st@(S cap q ts os opn) =
+rec : Poll (Async e) -> Once World (Maybe a) -> ST a -> (ST a, Async e es (Maybe a))
+rec poll def st@(S cap q ts os opn) =
   case dequeue q of
     Just (n,q2) => case dequeue os of
       Nothing           => (S (S cap) q2 ts os opn, pure (Just n))
       Just ((x,o), os2) => (S cap (enqueue q2 x) ts os2 opn, putOnce o (sendRes opn) $> Just n)
     Nothing     => case dequeue os of
       Nothing           => case opn of
-        True  => (S cap q (Just def) os opn, (awaitOnce def))
+        True  => (S cap q (Just def) os opn, poll (awaitOnce def))
         False => (st, pure Nothing)
       Just ((x,o), os2) => (S cap q ts os2 opn, putOnce o (sendRes opn) $> Just x)
 
@@ -101,9 +101,11 @@ export
 send : Channel a -> a -> Async e es SendRes
 send (C ref) v = do
   def <- onceOf SendRes
-  uncancelable $ \poll => do
-    act <- update ref (snd poll def v)
-    act
+  act <- update ref (snd id def v)
+  act
+  -- uncancelable $ \poll => do
+  --   act <- update ref (snd poll def v)
+  --   act
 
 ||| Extracts the next value from a channel potentially blocking
 ||| the calling fiber until such a value is available.
@@ -114,7 +116,7 @@ export
 receive : Channel a -> Async e es (Maybe a)
 receive (C ref) = do
   def <- onceOf (Maybe a)
-  act <- update ref (rec def)
+  act <- update ref (rec id def)
   act
   -- uncancelable $ \poll => do
   --   act <- update ref (rec poll def)
