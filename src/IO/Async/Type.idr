@@ -321,8 +321,8 @@ parameters (limit   : Nat)
         -- hook and just register the callback.
         _ =>
           let cncl # t := f (\r => el.spawn (Pkg fbr.env $ run el (terminal r) cm cc fbr st)) t
-           -- in () # t
-           in trace "Warning: Cant cancel async operation (\{show cm})" () # t
+           in () # t
+           -- in trace "Warning: Cant cancel async operation (\{show cm})" () # t
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
