@@ -13,6 +13,7 @@ import IO.Async.Loop.Poller
 import Profile.Alloc
 import Profile.Bind
 import Profile.ChainedSpawn
+import Profile.Consumers
 import Profile.ParTraverse
 import Profile.PingPong
 import Profile.Scheduling
@@ -45,6 +46,7 @@ act = do
     "profile-alloc"           :: t => Profile.Alloc.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
     "profile-chained-spawn"   :: t => Profile.ChainedSpawn.prog t
+    "profile-consumers"       :: t => Profile.Consumers.prog t
     "profile-par-traverse"    :: t => Profile.ParTraverse.prog t
     "profile-ping-pong"       :: t => Profile.PingPong.prog t
     "profile-scheduling"      :: t => Profile.Scheduling.prog t
