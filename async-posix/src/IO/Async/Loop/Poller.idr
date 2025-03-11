@@ -85,7 +85,7 @@ parameters (p : Posix)
   -- Uses `poll` to poll for file events.
   pollWaitImpl : (timeout : Clock Duration) -> IO1 ()
   pollWaitImpl to t =
-    let ms      := seconds to * 1000 + (nanoseconds to `div` 1000000)
+    let ms      := seconds to * 1000 + (nanoseconds to `div` 1_000_000)
         fds # t := read1 p.handles t
         pairs   := (\(fd,e,_) => PP fd e) <$> kvList fds
         vs # t  := dieOnErr (pollList pairs (cast ms)) t
