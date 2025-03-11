@@ -33,9 +33,9 @@ import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
 import System
+import System.Concurrency
 import System.Posix.File.Prim
 import System.Posix.Poll.Prim
-import System.Posix.Pthreads.Prim
 import System.Posix.Limits
 
 %default total
@@ -81,10 +81,10 @@ record Poll where
   signals : Sighandler
 
   ||| Mutex used for sleeping
-  lock    : MutexT
+  lock    : Mutex
 
   ||| Condition used for sleeping
-  cond    : CondT
+  cond    : Condition
 
 Task = Package Poll
 
@@ -101,14 +101,14 @@ workST me poll queues stealers =
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
-        lock  # t := dieOnErr (mkmutex MUTEX_NORMAL) t
-        cond  # t := dieOnErr mkcond t
+        lock  # t := ioToF1 makeMutex t
+        cond  # t := ioToF1 makeCondition t
      in W n me alive queues poll stealers tim sigh lock cond # t
 
 release : Poll -> IO1 ()
-release p t =
-  let _ # t := ffi (destroyCond p.cond) t
-   in ffi (destroyMutex p.lock) t
+release p t = () # t
+  -- let _ # t := ffi (destroyCond p.cond) t
+  --  in ffi (destroyMutex p.lock) t
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -118,9 +118,9 @@ nextFin : {n : _} -> Fin n -> Fin n
 nextFin FZ     = last
 nextFin (FS x) = weaken x
 
-sleepDuration : Integer -> Clock Duration
-sleepDuration 0 = 2.ms
-sleepDuration n = (cast $ min n 2_000_000).ns -- at most two milli seconds
+sleepDuration : Integer -> Int -- Clock Duration
+sleepDuration 0 = 2_000
+sleepDuration n = (min (cast $ n `div` 1000) 2_000) -- at most two milli seconds
 
 parameters (s : Poll)
 
@@ -193,13 +193,13 @@ parameters (s : Poll)
                         let _ # t := tsk.act t
                          in loop POLL_ITER t 
                       Nothing  # t =>
-                       let d     := sleepDuration r
-                           u # t := ioToF1 (clockTime UTC) t
-                           till  := addDuration u d
-                           _ # t := dieOnErr (lockMutex s.lock) t
+                       let till     := sleepDuration r
+                           -- u # t := ioToF1 (clockTime UTC) t
+                           -- till  := addDuration u d
+                           _ # t := ioToF1 (mutexAcquire s.lock) t
                            -- b # t := dieOnErr (condTimedwait s.cond s.lock $ trace "\{show s.me} goin to sleep for \{show d}" till) t
-                           b # t := dieOnErr (condTimedwait s.cond s.lock  till) t
-                           _ # t := dieOnErr (unlockMutex s.lock) t
+                           _ # t := ioToF1 (conditionWaitTimeout s.cond s.lock  till) t
+                           _ # t := ioToF1 (mutexRelease s.lock) t
                            -- _ # t := ioToF1 (putStrLn "\{show s.me} woke up (timed out: \{show $ not b})") t
                         in loop POLL_ITER t
 
@@ -245,7 +245,7 @@ submit p t =
   let st   # t := read1 p.env t
       True # t := casupdate st.queues st.me (enq p) t | False # t => () # t
    -- in dieOnErr (trace "signalling \{show st.me}" $ condSignal st.cond) t
-   in dieOnErr (condSignal st.cond) t
+   in ioToF1 (conditionSignal st.cond) t
 
 workSTs :
      {n : _}
