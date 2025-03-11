@@ -69,7 +69,7 @@ deqAndSleep (Q asleep h t) =
 --------------------------------------------------------------------------------
 
 STEAL_MAX : Nat
-STEAL_MAX = 10
+STEAL_MAX = 2
 
 -- we want to steal at most half + 1 tasks from the head of a
 -- queue, so this counts elements from the head two at a time.

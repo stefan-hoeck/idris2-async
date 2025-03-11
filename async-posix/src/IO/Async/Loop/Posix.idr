@@ -189,13 +189,18 @@ parameters (s : Poll)
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
                  in case casupdate s.queues s.me deqAndSleep t of
-                      Just tsk # t => let _ # t := tsk.act t in loop POLL_ITER t 
+                      Just tsk # t =>
+                        let _ # t := tsk.act t
+                         in loop POLL_ITER t 
                       Nothing  # t =>
-                       let _ # t := dieOnErr (lockMutex s.lock) t
-                           d     := sleepDuration r
-                           -- _ # t := dieOnErr (condTimedwait s.cond s.lock $ trace "\{show s.me} goin to sleep for \{show d}" d) t
-                           _ # t := dieOnErr (condTimedwait s.cond s.lock  d) t
+                       let d     := sleepDuration r
+                           u # t := ioToF1 (clockTime UTC) t
+                           till  := addDuration u d
+                           _ # t := dieOnErr (lockMutex s.lock) t
+                           -- b # t := dieOnErr (condTimedwait s.cond s.lock $ trace "\{show s.me} goin to sleep for \{show d}" till) t
+                           b # t := dieOnErr (condTimedwait s.cond s.lock  till) t
                            _ # t := dieOnErr (unlockMutex s.lock) t
+                           -- _ # t := ioToF1 (putStrLn "\{show s.me} woke up (timed out: \{show $ not b})") t
                         in loop POLL_ITER t
 
 --------------------------------------------------------------------------------
@@ -237,9 +242,10 @@ stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 
 submit : Task -> IO1 ()
 submit p t =
-  let st # t := read1 p.env t
-      b  # t := casupdate st.queues st.me (enq p) t
-   in when1 b (dieOnErr (condSignal st.cond)) t
+  let st   # t := read1 p.env t
+      True # t := casupdate st.queues st.me (enq p) t | False # t => () # t
+   -- in dieOnErr (trace "signalling \{show st.me}" $ condSignal st.cond) t
+   in dieOnErr (condSignal st.cond) t
 
 workSTs :
      {n : _}
