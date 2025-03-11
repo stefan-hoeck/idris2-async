@@ -21,6 +21,11 @@ export %inline
 queueOf : (0 a : Type) -> Queue a
 queueOf _ = Q False [] [<]
 
+export
+isEmpty : Queue a -> Bool
+isEmpty (Q _ [] [<]) = True
+isEmpty _            = False
+
 ||| Enqueues a value returning whether the loop belonging to
 ||| this queue is currently running.
 |||

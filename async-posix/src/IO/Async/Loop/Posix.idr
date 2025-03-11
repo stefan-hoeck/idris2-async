@@ -66,6 +66,9 @@ record Poll where
   ||| Work queues of all worker threads
   queues   : IOArray size (Queue Task)
 
+  ||| Last ceded task
+  ceded    : IORef (Maybe Task)
+
   ||| The state used for polling file descriptors
   poller   : Poller
 
@@ -101,9 +104,10 @@ workST me poll queues stealers =
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
+        ceded # t := ref1 Nothing t
         lock  # t := ioToF1 makeMutex t
         cond  # t := ioToF1 makeCondition t
-     in W n me alive queues poll stealers tim sigh lock cond # t
+     in W n me alive queues ceded poll stealers tim sigh lock cond # t
 
 release : Poll -> IO1 ()
 release p t = () # t
@@ -147,15 +151,17 @@ parameters (s : Poll)
   %inline
   next : IO1 (Maybe Task)
   next t =
-    case casupdate s.queues s.me deq t of
-      Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
-        -- 0   # t => trace "\{show s.me} cant currently steal" Nothing # t
-        0   # t => Nothing # t
-        S k # t =>
-         let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
-             _   # t := casmod1 s.stealers S t
-          in tsk # t
-      tsk # t => tsk # t
+    case read1 s.ceded t of
+      Nothing # t => case casupdate s.queues s.me deq t of
+        Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
+          -- 0   # t => trace "\{show s.me} cant currently steal" Nothing # t
+          0   # t => Nothing # t
+          S k # t =>
+           let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
+               _   # t := casmod1 s.stealers S t
+            in tsk # t
+        tsk # t => tsk # t
+      tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -250,6 +256,16 @@ submit p t =
    -- in dieOnErr (trace "signalling \{show st.me}" $ condSignal st.cond) t
    in ioToF1 (mutexRelease st.lock) t
 
+cede : Task -> IO1 ()
+cede p t =
+  let st # t := read1 p.env t
+      q  # t := AC.get st.queues st.me t
+   in case isEmpty q of
+        True  => write1 st.ceded (Just p) t
+        False =>
+         let _ # t := casupdate st.queues st.me (enq p) t
+          in () # t
+
 workSTs :
      {n : _}
   -> (poll : Poller)
@@ -285,7 +301,7 @@ mkThreadPool (Element (S k) _) mkPoll = do
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   pi <- fork (runIO $ pollLoop (head ws).alive pl)
   let tp := TP k ts pi ws
-  pure (tp, EL submit submit (head ws))
+  pure (tp, EL submit cede (head ws))
 
 toIO : Elin World [Errno] () -> IO ()
 toIO = ignore . runElinIO
