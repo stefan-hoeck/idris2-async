@@ -14,6 +14,7 @@ modules = IO.Async.File
         , IO.Async.Loop.PollH
         , IO.Async.Loop.Poller
         , IO.Async.Loop.Posix
+        , IO.Async.Loop.Queue
         , IO.Async.Loop.SignalH
         , IO.Async.Loop.SignalST
 

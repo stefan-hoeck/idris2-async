@@ -25,7 +25,7 @@ parameters {auto has : Has Errno es}
 
   dosend : Nat -> Prog es ()
   dosend n = do
-    _  <- race2 (await d) (send c n)
+    _  <- race2 (await d) (sleep 10.ms >> send c n)
     pure ()
 
   fbrc : Nat -> Prog es ()
