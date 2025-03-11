@@ -119,8 +119,8 @@ nextFin FZ     = last
 nextFin (FS x) = weaken x
 
 sleepDuration : Integer -> Int -- Clock Duration
-sleepDuration 0 = 2_000
-sleepDuration n = (min (cast $ n `div` 1000) 2_000) -- at most two milli seconds
+sleepDuration 0 = 20_000
+sleepDuration n = (min (cast $ n `div` 1000) 20_000) -- at most two milli seconds
 
 parameters (s : Poll)
 
@@ -188,15 +188,16 @@ parameters (s : Poll)
                Just tsk # t => let _ # t := tsk.act t in loop k t
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
+                    _ # t := ioToF1 (mutexAcquire s.lock) t
                  in case casupdate s.queues s.me deqAndSleep t of
                       Just tsk # t =>
-                        let _ # t := tsk.act t
+                        let _ # t := ioToF1 (mutexRelease s.lock) t
+                            _ # t := tsk.act t
                          in loop POLL_ITER t 
                       Nothing  # t =>
                        let till     := sleepDuration r
                            -- u # t := ioToF1 (clockTime UTC) t
                            -- till  := addDuration u d
-                           _ # t := ioToF1 (mutexAcquire s.lock) t
                            -- b # t := dieOnErr (condTimedwait s.cond s.lock $ trace "\{show s.me} goin to sleep for \{show d}" till) t
                            _ # t := ioToF1 (conditionWaitTimeout s.cond s.lock  till) t
                            _ # t := ioToF1 (mutexRelease s.lock) t
@@ -244,8 +245,10 @@ submit : Task -> IO1 ()
 submit p t =
   let st   # t := read1 p.env t
       True # t := casupdate st.queues st.me (enq p) t | False # t => () # t
+      _    # t := ioToF1 (mutexAcquire st.lock) t
+      _    # t := ioToF1 (conditionSignal st.cond) t
    -- in dieOnErr (trace "signalling \{show st.me}" $ condSignal st.cond) t
-   in ioToF1 (conditionSignal st.cond) t
+   in ioToF1 (mutexRelease st.lock) t
 
 workSTs :
      {n : _}
@@ -265,7 +268,7 @@ covering
 pollLoop : (alive : Ref World Bool) -> Poller -> IO1 ()
 pollLoop ref p t =
   let True # t := read1 ref t | _ # t => p.release t
-      _    # t := p.pollWait 1.ms t
+      _    # t := p.pollWait 10.ms t
    in pollLoop ref p t
 
 ||| Create a new thread pool of `n` worker threads and additional
