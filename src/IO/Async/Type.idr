@@ -55,7 +55,12 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
   -- Cedes control to the execution context
   Cede : Async e es ()
 
-  Start : Async e es a -> Async e fs (Fiber es a)
+  -- Starts a new fiber. If `fast` is set to `True`, this is supposed
+  -- to be a) a very short-lived fiber, or b), a fiber that just registers
+  -- a callback before blocking. In both cases, it is probably not worth
+  -- it to run the fiber on a different loop/thread, so it won't be
+  -- offered for stealing.
+  Start : (fast : Bool) -> Async e es a -> Async e fs (Fiber es a)
 
   Asnc   : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 
@@ -87,7 +92,21 @@ primAsync = Asnc
 ||| Starts a new fiber, running it concurrently to the current one
 export %inline
 start : Async e es a -> Async e fs (Fiber es a)
-start = Start
+start act =
+  case act of
+    Val _     => Start True act
+    Err _     => Start True act
+    Cancel    => Start True act
+    Env       => Start True act
+    Cede      => Start True act
+    Start _ _ => Start True act
+    Asnc _    => Start True act
+    _         => Start False act
+
+||| Starts a new fiber, running it concurrently to the current one
+export %inline
+startLocal : Async e es a -> Async e fs (Fiber es a)
+startLocal = Start True
 
 ||| Cedes control back to the execution context.
 export %inline
@@ -227,8 +246,9 @@ parameters (limit   : Nat)
     -> IO1 ()
 
   covering
-  spawnFib : EventLoop e -> FiberImpl e es a -> Async e es a -> IO1 ()
-  spawnFib el f act = el.spawn (Pkg f.env (run el act 0 limit f []))
+  spawnFib : EventLoop e -> Bool -> FiberImpl e es a -> Async e es a -> IO1 ()
+  spawnFib el False f act = el.spawn (Pkg f.env (run el act 0 limit f []))
+  spawnFib el True  f act = el.cede (Pkg f.env (run el act 0 limit f []))
 
   run el act cm 0     fbr st t = cedeFbr el fbr (run el act cm limit fbr st) t
   run el act 0  (S k) fbr st t =
@@ -280,9 +300,9 @@ parameters (limit   : Nat)
         Abort  :: tl => finalize fbr Canceled t
         []          => finalize fbr (Error x) t
 
-      Start x     =>
+      Start b x   =>
         let fbr2 # t := newFiber el t
-            _    # t := spawnFib el fbr2 x t
+            _    # t := spawnFib el b fbr2 x t
          in run el (pure $ toFiber fbr2) cm cc fbr st t
 
       Sync x      =>
@@ -331,7 +351,7 @@ parameters (limit   : Nat)
   runAsyncWith el act cb = runIO $ \t =>
     let fbr # t := newFiber el t
         _   # t := observeDeferred1 fbr.res (\o => ioToF1 $ cb o) t
-     in spawnFib el fbr act t
+     in spawnFib el False fbr act t
   
   export covering %inline
   runAsync : EventLoop e -> Async e es a -> IO ()

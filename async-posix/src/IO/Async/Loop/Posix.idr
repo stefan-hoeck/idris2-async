@@ -66,7 +66,7 @@ record Poll where
   queues   : IOArray size (Queue Task)
 
   ||| Last ceded task
-  ceded    : IORef (Maybe Task)
+  ceded    : IORef (SnocList Task)
 
   ||| The state used for polling file descriptors
   poller   : Poller
@@ -103,7 +103,7 @@ workST me poll queues stealers =
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
-        ceded # t := ref1 Nothing t
+        ceded # t := ref1 [<] t
         lock  # t := ioToF1 makeMutex t
         cond  # t := ioToF1 makeCondition t
      in W n me alive queues ceded poll stealers tim sigh lock cond # t
@@ -146,18 +146,24 @@ parameters (s : Poll)
   -- If there is no task, we go stealing from other work loops unless
   -- too many stealers are already active.
   %inline
-  next : IO1 (Maybe Task)
+  next : IO1 (List Task)
   next t =
     case read1 s.ceded t of
-      Nothing # t => case casupdate s.queues s.me deq t of
+      [<] # t => case casupdate s.queues s.me deq t of
         Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
-          0   # t => Nothing # t
+          0   # t => [] # t
           S k # t =>
            let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
                _   # t := casmod1 s.stealers S t
-            in tsk # t
-        tsk # t => tsk # t
-      tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
+            in toList tsk # t
+        Just tsk # t => [tsk] # t
+      tsk # t => let _ # t := write1 s.ceded [<] t in (tsk <>> []) # t
+
+  fetchFromLoop : IO1 ()
+  fetchFromLoop t =
+    case casupdate s.queues s.me deq t of
+      Nothing # t => () # t
+      Just tk # t => mod1 s.ceded (:< tk) t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -178,6 +184,7 @@ parameters (s : Poll)
         -- and continue.
         0   =>
          let _ # t := checkSignals s.signals t
+             _ # t := fetchFromLoop t
           in loop POLL_ITER t
 
         -- No time for polling. Check timers and get the next task to run -
@@ -186,8 +193,10 @@ parameters (s : Poll)
         S k =>
          let r # t := runDueTimers s.timer t
           in case next t of
-               Just tsk # t => let _ # t := tsk.act t in loop k t
-               Nothing  # t =>
+               ts@(_::_) # t =>
+                 let _ # t := traverse1_ act ts t
+                  in loop k t
+               []  # t =>
                 let _ # t := checkSignals s.signals t
                     _ # t := ioToF1 (mutexAcquire s.lock) t
                  in case casupdate s.queues s.me deqAndSleep t of
@@ -249,12 +258,7 @@ submit p t =
 cede : Task -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
-      q  # t := AC.get st.queues st.me t
-   in case isEmpty q of
-        True  => write1 st.ceded (Just p) t
-        False =>
-         let _ # t := casupdate st.queues st.me (enq p) t
-          in () # t
+   in mod1 st.ceded (:< p) t
 
 workSTs :
      {n : _}
