@@ -236,7 +236,7 @@ covering
 raceParallel : TimerH e => SignalH e => Async e [Errno] ()
 raceParallel = do
   stdoutLn "Racing countdowns"
-  ignore $ race
+  ignore $ race_
     [ countSeconds 10000
     , countMillis 200
     , onSignal SIGINT (stdoutLn "\nInterrupted by SIGINT")

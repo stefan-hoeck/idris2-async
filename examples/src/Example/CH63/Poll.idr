@@ -77,7 +77,7 @@ parameters {auto has : Has Errno es}
   app : (t : String) -> Prog es ()
   app t = do
     (o,rep) <- readSpec t
-    ignore $ race [readLoop, sleepLoop o rep]
+    race_ [readLoop, sleepLoop o rep]
   
   export covering
   prog : List String -> Prog es ()
