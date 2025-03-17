@@ -24,20 +24,18 @@ parameters {auto has : Has Errno es}
            (d : Deferred World ())
 
   dosend : Nat -> Prog es ()
-  dosend n = do
-    _  <- race2 (await d) (send c n)
-    pure ()
+  dosend n = race2 (await d) (send c n) (const ()) (const ()) ()
 
   fbrc : Nat -> Prog es ()
   fbrc n = traverse_ dosend [0 .. n]
   
   loopc : IORef Nat -> Prog es ()
-  loopc r = do
-    race [await d $> Just 0, receive c] >>= \case
-      Just (Just n) => do
+  loopc r =
+    race2 (await d) (receive c) (const Nothing) id Nothing >>= \case
+      Just n  => do
         mod r S
         loopc r
-      _             => pure ()
+      Nothing => pure ()
 
 measure : Has Errno es => Nat -> Prog es ()
 measure n = do

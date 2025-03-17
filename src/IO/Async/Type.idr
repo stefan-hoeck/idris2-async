@@ -6,6 +6,7 @@ import IO.Async.Loop
 import IO.Async.Internal.Ref
 import Data.Linear.Deferred
 import Data.Linear.Unique
+import Syntax.T1
 
 import public Control.Monad.MCancel
 import public Data.Linear.ELift1
@@ -16,6 +17,19 @@ public export
 0 Callback : List Type -> Type -> Type
 Callback es a = Outcome es a -> IO1 ()
 
+||| A fiber is a series of computations that will be run
+||| in strict sequence that will eventually terminate
+||| with a result of type `Outcome es a`: It will either
+||| produce a result of type `a`, an error of type `HSum es`,
+||| or - in case it was canceled early - end with `Canceled`.
+|||
+||| From the outside, a fiber can be observed by installing 
+||| a callback, which will be invoked as soon as the fiber has
+||| terminated with a result.
+|||
+||| In addition, a running fiber can be canceled, so that it
+||| aborts all computations at soon as possible. Canceled a fiber
+||| that has already completed is a no-op.
 public export
 record Fiber (es : List Type) (a : Type) where
   constructor MkFiber
@@ -193,6 +207,18 @@ observeCancel : Once World (Outcome es a) -> Nat -> FiberImpl e fs b -> IO1 (IO1
 observeCancel o 0 f = observeOnce1 f.cncl (\_ => putOnce1 o Canceled)
 observeCancel _ _ _ = (unit1 #)
 
+-- a fiber that has already completed with the given result.
+synchronous : Outcome es a -> Fiber es a
+synchronous o = MkFiber unit1 (\cb,t => let _ # t := cb o t in unit1 # t)
+
+-- a fiber from an asynchronous computation.
+asynchronous : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> IO1 (Fiber es a)
+asynchronous install t =
+  let def     # t := deferredOf1 (Outcome es a) t
+      cleanup # t := install (putDeferred1 def . toOutcome) t
+      cncl        := T1.do cleanup; putDeferred1 def Canceled
+   in MkFiber cncl (observeDeferred1 def) # t
+
 parameters (limit   : Nat)
 
   -- Invokes runR or runC depending on if the fiber has
@@ -280,10 +306,19 @@ parameters (limit   : Nat)
         Abort  :: tl => finalize fbr Canceled t
         []          => finalize fbr (Error x) t
 
-      Start x     =>
-        let fbr2 # t := newFiber el t
-            _    # t := spawnFib el fbr2 x t
-         in run el (pure $ toFiber fbr2) cm cc fbr st t
+      -- For certain fibers it is not necessary to actually spawn them
+      -- on the event loop, so we optimize those away.
+      Start x     => case x of
+        Asnc reg =>
+          let f2 # t := asynchronous reg t
+           in run el (pure f2) cm cc fbr st t
+        Cancel => run el (pure $ synchronous Canceled) cm cc fbr st t
+        Val v  => run el (pure $ synchronous (Succeeded v)) cm cc fbr st t
+        Err x  => run el (pure $ synchronous (Error x)) cm cc fbr st t
+        _ =>
+          let fbr2 # t := newFiber el t
+              _    # t := spawnFib el fbr2 x t
+           in run el (pure $ toFiber fbr2) cm cc fbr st t
 
       Sync x      =>
         let r # t := ioToF1 x t

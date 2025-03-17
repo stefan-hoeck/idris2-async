@@ -74,6 +74,12 @@ primAsync_ f =
     let _ # t := f cb t
      in unit1 # t
 
+||| A (cancelable) asynchronous computation that will never produce a
+||| result
+export
+never : Async e es a
+never = primAsync_ $ \cb => unit1
+
 ||| Awaits the completion of a `Once a`.
 export %inline
 awaitOnce : Once World a -> Async e es a
@@ -83,6 +89,16 @@ awaitOnce o = primAsync $ \cb => observeOnce1 o (cb . Right)
 export %inline
 await : Deferred World a -> Async e es a
 await d = primAsync $ \cb => observeDeferred1 d (cb . Right)
+
+listenPair :
+     Fiber es a
+  -> Fiber fs b
+  -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
+listenPair f1 f2 =
+  primAsync $ \cb,t =>
+    let c1 # t := f1.observe_ (\o => cb (Right $ Left  (o, f2))) t
+        c2 # t := f2.observe_ (\o => cb (Right $ Right (f1, o))) t
+     in (\t => let _ # t := c1 t in c2 t) # t
 
 ||| A low-level primitive for racing the evaluation of two fibers that returns the [[Outcome]]
 ||| of the winner and the [[Fiber]] of the loser. The winner of the race is considered to be
@@ -96,10 +112,9 @@ racePair :
   -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
 racePair x y =
   uncancelable $ \poll => Prelude.do
-    o  <- onceOf (Either (Outcome es a) (Outcome fs b))
-    f1 <- start (guaranteeCase x (putOnce o . Left))
-    f2 <- start (guaranteeCase y (putOnce o . Right))
-    bimap (,f2) (f1,) <$> onCancel (poll (awaitOnce o)) (cancel f1 >> cancel f2)
+    f1 <- start x
+    f2 <- start y
+    poll (listenPair f1 f2)
 
 ||| Awaits the completion of the bound fiber and returns its result once it completes.
 ||| 
@@ -165,56 +180,51 @@ raceOutcome fa fb =
 ||| @see
 |||   [[raceOutcome]] for a variant that returns the outcome of the winner.
 export
-race2 : Async e es a -> Async e es b -> Async e es (Maybe $ Either a b)
-race2 fa fb =
+race2 :
+     Async e es a
+  -> Async e es b
+  -> (a -> c)
+  -> (b -> c)
+  -> Lazy c
+  -> Async e es c
+race2 fa fb ac bc dflt =
   uncancelable $ \poll => poll (racePair fa fb) >>= \case
     Left  (oc,f) => case oc of
-      Succeeded res => cancel f $> Just (Left res)
+      Succeeded res => cancel f $> ac res
       Error err     => cancel f >> fail err
       Canceled      => cancel f >> join f >>= \case
-        Succeeded res => pure $ Just (Right res)
+        Succeeded res => pure $ bc res
         Error err     => fail err
-        Canceled      => pure Nothing
+        Canceled      => pure dflt
     Right (f,oc) => case oc of
-      Succeeded res => cancel f $> Just (Right res)
+      Succeeded res => cancel f $> bc res
       Error err     => cancel f >> fail err
       Canceled      => cancel f >> join f >>= \case
-        Succeeded res => pure $ Just (Left res)
+        Succeeded res => pure $ ac res
         Error err     => fail err
-        Canceled      => pure Nothing
+        Canceled      => pure dflt
 
 ||| This generalizes `race2` to an arbitrary heterogeneous list.
 export
 hrace : All (Async e es) ts -> Async e es (Maybe $ HSum ts)
 hrace []       = pure Nothing
 hrace [x]      = map (Just . Here) x
-hrace (x :: y) =
-  flip map (race2 x $ hrace y) $ \case
-    Just (Left z)         => Just (Here z)
-    Just (Right (Just z)) => Just (There z)
-    _                     => Nothing
+hrace (x :: y) = race2 x (hrace y) (Just . Here) (map There) Nothing
 
 ||| A more efficient, monomorphic version of `hrace` with slightly
 ||| different semantics: The winner decides the outcome of the are
 ||| even if it has been cancele.
 export
-race : List (Async e es a) -> Async e es (Maybe a)
-race []  = pure Nothing
-race [x] = map Just x
-race xs  =
-  uncancelable $ \poll => do
-    o  <- onceOf (Outcome es a)
-    fs <- traverse (\f => start $ guaranteeCase f (putOnce o)) xs
-    flip guarantee (traverse_ cancel fs) $ poll (awaitOnce o) >>= \case
-      Succeeded res => pure (Just res)
-      Error err     => fail err
-      Canceled      => pure Nothing
+race : (dflt : Lazy a) -> List (Async e es a) -> Async e es a
+race dflt []      = pure dflt
+race dflt [x]     = x
+race dflt (x::xs) = race2 x (race dflt xs) id id dflt
 
 ||| Runs several non-productive fibers in parallel, terminating
 ||| as soon as the first one completes.
 export %inline
 race_ : List (Async e es ()) -> Async e es ()
-race_ = ignore . race
+race_ = race ()
 
 ||| Races the evaluation of two fibers and returns the [[Outcome]] of both. If the race is
 ||| canceled before one or both participants complete, then then whichever ones are incomplete

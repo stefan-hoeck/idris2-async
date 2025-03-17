@@ -16,6 +16,7 @@ import Profile.ChainedSpawn
 import Profile.Consumers
 import Profile.ParTraverse
 import Profile.PingPong
+import Profile.Race
 import Profile.Scheduling
 import Profile.Spawn
 import Profile.Timer
@@ -49,6 +50,7 @@ act = do
     "profile-consumers"       :: t => Profile.Consumers.prog t
     "profile-par-traverse"    :: t => Profile.ParTraverse.prog t
     "profile-ping-pong"       :: t => Profile.PingPong.prog t
+    "profile-race"            :: t => Profile.Race.prog t
     "profile-scheduling"      :: t => Profile.Scheduling.prog t
     "profile-spawn"           :: t => Profile.Spawn.prog t
     "profile-timer"           :: t => Profile.Timer.prog t

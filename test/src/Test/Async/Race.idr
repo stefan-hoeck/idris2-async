@@ -19,10 +19,8 @@ data Event : Type where
 
 %runElab derive "Event" [Show,Eq]
 
-toEvent : Outcome [String] (Maybe $ Either Nat Nat) -> Event
-toEvent (Succeeded Nothing)          = None
-toEvent (Succeeded (Just (Left x)))  = RNat x
-toEvent (Succeeded (Just (Right x))) = RNat x
+toEvent : Outcome [String] Nat -> Event
+toEvent (Succeeded x)                = RNat x
 toEvent (Error $ Here x)             = RErr x
 toEvent Canceled                     = None
 
@@ -50,17 +48,15 @@ parameters {auto ref : IORef (SnocList Event)}
       Canceled _ => canceled $> k
       _          => fire (x k) >> events k xs
 
-  rce :
-       List (Nat -> Event)
-    -> List (Nat -> Event)
-    -> Async e [String] (Maybe $ Either Nat Nat)
+  rce : List (Nat -> Event) -> List (Nat -> Event) -> Async e [String] Nat
   rce xs ys =
     race2
       (onCncl 1 $ events 1 xs)
       (onCncl 2 $ events 2 ys)
+      id id 0
 
 run :
-     (IORef (SnocList Event) => Async e [String] (Maybe $ Either Nat Nat))
+     (IORef (SnocList Event) => Async e [String] Nat)
   -> Async e es (List Event)
 run f = do
   ref <- newref [<]
