@@ -43,21 +43,43 @@ parameters {auto has : Has Errno es}
 
   ||| Reads from a file descriptor without blocking.
   |||
-  ||| The descriptor is polled before reading, so the read is
-  ||| guaranteed to not block. Use this for reading from potentially
-  ||| blocking pipes and sockets.
+  ||| If the descriptor corresponds to a regular file, this will just
+  ||| read up to the given amount of bytes from the file. If the descriptor
+  ||| corresponds to a socket or FIFO (pipe), the `O_NONBLOCK` flag of
+  ||| the descriptor *must* have been set (via `addFlags` for instance).
+  |||
+  ||| This will then first try to read from the descriptor without
+  ||| polling, and if this fails with `EAGAIN`, proper file polling is used.
   export
   readnb : (0 r : Type) -> FromBuf r => Bits32 -> Async e es r
-  readnb r n = onEvent POLLIN (read fd r n)
+  readnb r n =
+    attempt (read {es = [Errno]} fd r n) >>= \case
+      Left (Here x) =>
+        if x == EAGAIN || x == EWOULDBLOCK
+           then onEvent POLLIN (read fd r n)
+           else throw x
+      Right res => pure res
+
 
   ||| Writes to a file descriptor without blocking.
   |||
-  ||| The descriptor is polled before writing, so the write is
-  ||| guaranteed to not block. Use this for writing to potentially
-  ||| blocking pipes and sockets.
+  ||| If the descriptor corresponds to a regular file, this will just
+  ||| write up to the given amount of bytes to the file. If the descriptor
+  ||| corresponds to a socket or FIFO (pipe), the `O_NONBLOCK` flag of
+  ||| the descriptor *must* have been set (via `addFlags` for instance).
+  |||
+  ||| This will then first try to write to the descriptor without
+  ||| polling, and if this fails with `EAGAIN`, proper file polling is used.
   export
   writenb : ToBuf r => r -> Async e es Bits32
-  writenb v = onEvent POLLOUT (ifError EAGAIN 0 $ write fd v)
+  writenb v =
+    attempt (write {es = [Errno]} fd v) >>= \case
+      Left (Here x) =>
+        if x == EAGAIN || x == EWOULDBLOCK
+           then onEvent POLLOUT (write fd v)
+           else throw x
+      Right res => pure res
+
 
   ||| Iteratively writes a value to a file descriptor making sure
   ||| that the whole value is written. Use this, if a single call to
