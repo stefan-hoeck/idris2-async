@@ -312,6 +312,7 @@ app :
   -> IO ()
 app n sigs mkPoll prog = do
   toIO $ sigprocmask SIG_BLOCK sigs
+  runIO (dieOnErr $ addFlags Stdin O_NONBLOCK)
   (tp,el) <- mkThreadPool n mkPoll
   runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
   runIO (loop (head tp.workers) POLL_ITER)
