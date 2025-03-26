@@ -131,8 +131,10 @@ spawnImpl pkg t =
    in run s [] t
 
 %inline
-parkImpl : SyncST -> Token World -> IO1 () -> IO1 ()
-parkImpl s tok act t = mod1 s.parked (insert tok act) t
+parkImpl : Token World -> Package SyncST -> IO1 ()
+parkImpl tok (Pkg env act) t =
+  let s # t := read1 env t
+   in mod1 s.parked (insert tok act) t
 
 unparkImpl : SyncST -> Token World -> IO1 ()
 unparkImpl s tok t =

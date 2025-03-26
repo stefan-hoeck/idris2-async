@@ -36,6 +36,6 @@ record EventLoop (e : Type) where
   constructor EL
   spawn  : Package e -> IO1 ()
   cede   : Package e -> IO1 ()
-  park   : e -> Token World -> IO1 () -> IO1 ()
+  park   : Token World -> Package e -> IO1 ()
   unpark : e -> Token World -> IO1 ()
   init   : e

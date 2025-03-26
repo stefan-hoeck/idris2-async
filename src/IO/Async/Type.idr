@@ -349,7 +349,7 @@ parameters (limit   : Nat)
             es # t := read1 fbr.env t
          in case peekOnce1 o t of
               Nothing  # t =>
-                let _ # t := el.park es fbr.token (run el (Wait o) cm cc fbr st) t
+                let _ # t := el.park fbr.token (Pkg fbr.env $ run el (Wait o) cm cc fbr st) t
                     _ # t := observeOnce1 o (\out,t => case out of
                                Succeeded r => let _ # t := c2 t in el.unpark es fbr.token t
                                Error     x => let _ # t := c2 t in el.unpark es fbr.token t

@@ -21,7 +21,9 @@ import Control.Monad.Elin
 import Data.Array.Core as AC
 import Data.Array.Mutable
 import Data.Linear.Traverse1
+import Data.Linear.Unique
 import Data.List
+import Data.SortedMap
 import Data.Vect
 
 import IO.Async.Internal.Ref
@@ -65,6 +67,12 @@ record Poll where
   ||| Work queues of all worker threads
   queues   : IOArray size (Queue Task)
 
+  ||| Parked fibers waiting for an asynchronous response
+  parked   : IORef (SortedMap (Token World) Task)
+
+  ||| Parked fibers waiting for an asynchronous response
+  unparked : IORef (SnocList (Token World))
+
   ||| Last ceded task
   ceded    : IORef (Maybe Task)
 
@@ -104,9 +112,11 @@ workST me poll queues stealers =
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
         ceded # t := ref1 Nothing t
+        prkd  # t := ref1 SortedMap.empty t
+        uprk  # t := ref1 [<] t
         lock  # t := ioToF1 makeMutex t
         cond  # t := ioToF1 makeCondition t
-     in W n me alive queues ceded poll stealers tim sigh lock cond # t
+     in W n me alive queues prkd uprk ceded poll stealers tim sigh lock cond # t
 
 release : Poll -> IO1 ()
 release p t = () # t
@@ -125,7 +135,19 @@ sleepDuration : Integer -> Int -- Clock Duration
 sleepDuration 0 = 20_000
 sleepDuration n = (min (cast $ n `div` 1000) 20_000) -- at most two milli seconds
 
+%inline
+parkImpl : Token World -> Task -> IO1 ()
+parkImpl tok pkg t =
+  let s # t := read1 pkg.env t
+   in mod1 s.parked (insert tok pkg) t
+
 parameters (s : Poll)
+
+  %inline
+  unparkImpl : Token World -> IO1 ()
+  unparkImpl tok t =
+   let _ # t := casmod1 s.unparked (:< tok) t
+    in ioToF1 (conditionSignal s.cond) t
 
   -- tries to steal a task from another worker
   stealTasks : Fin s.size -> Nat -> IO1 (Maybe Task)
@@ -139,6 +161,21 @@ parameters (s : Poll)
            _ # t := casmodify s.queues s.me (enqall tl) t
         in Just h # t
 
+  unparkTok : Token World -> IO1 ()
+  unparkTok tok t =
+    let m # t := read1 s.parked t
+     in case lookup tok m of
+          Nothing  => () # t
+          Just pkg =>
+           let _ # t := casupdate s.queues s.me (enq pkg) t
+            in write1 s.parked (delete tok m) t
+
+  doUnpark : IO1 ()
+  doUnpark t =
+    case casupdate1 s.unparked (\x => ([<], x)) t of
+      [<] # t => () # t
+      st  # t => traverse1_ unparkTok (st <>> []) t
+
   -- Looks for the next task to run. If possible, this will be the
   -- last ceded task of this work loop, unless our queue is non-empty,
   -- in which case the ceded task has to be appended to the queue.
@@ -148,16 +185,17 @@ parameters (s : Poll)
   %inline
   next : IO1 (Maybe Task)
   next t =
-    case read1 s.ceded t of
-      Nothing # t => case casupdate s.queues s.me deq t of
-        Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
-          0   # t => Nothing # t
-          S k # t =>
-           let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
-               _   # t := casmod1 s.stealers S t
-            in tsk # t
-        tsk # t => tsk # t
-      tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
+   let _ # t := doUnpark t
+    in case read1 s.ceded t of
+         Nothing # t => case casupdate s.queues s.me deq t of
+           Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
+             0   # t => Nothing # t
+             S k # t =>
+              let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
+                  _   # t := casmod1 s.stealers S t
+               in tsk # t
+           tsk # t => tsk # t
+         tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -291,7 +329,7 @@ mkThreadPool (Element (S k) _) mkPoll = do
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   pi <- fork (runIO $ pollLoop (head ws).alive pl)
   let tp := TP k ts pi ws
-  pure (tp, EL submit cede (head ws))
+  pure (tp, EL submit cede parkImpl unparkImpl (head ws))
 
 toIO : Elin World [Errno] () -> IO ()
 toIO = ignore . runElinIO
