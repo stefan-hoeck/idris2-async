@@ -1,6 +1,7 @@
 module IO.Async.Loop.Sync
 
 import Data.Linear.Traverse1
+import Data.Linear.Unique
 import Data.So
 import Data.SortedMap
 import public IO.Async.Loop
@@ -36,6 +37,7 @@ record SyncST where
   constructor SST
   timers  : IORef (SortedMap (Clock Monotonic) $ List Timed)
   queue   : IORef (SnocList $ IO1 ())
+  parked  : IORef (SortedMap (Token World) $ IO1 ())
   running : IORef Bool
 
 export
@@ -128,6 +130,20 @@ spawnImpl pkg t =
       _     # t := write1 s.running True t
    in run s [] t
 
+%inline
+parkImpl : SyncST -> Token World -> IO1 () -> IO1 ()
+parkImpl s tok act t = mod1 s.parked (insert tok act) t
+
+unparkImpl : SyncST -> Token World -> IO1 ()
+unparkImpl s tok t =
+  let m # t := read1 s.parked t
+   in case lookup tok m of
+        Just act => 
+          let _ # t := write1 s.parked (delete tok m) t
+           in mod1 s.queue (:< act) t
+        Nothing => () # t
+
+
 ||| A synchronous event loop running all asynchronous computations
 ||| on the calling thread.
 |||
@@ -136,5 +152,5 @@ spawnImpl pkg t =
 export covering
 sync : IO (EventLoop SyncST)
 sync = do
-  st <- [| SST (newref empty) (newref [<]) (newref False) |]
-  pure (EL spawnImpl cedeImpl st)
+  st <- [| SST (newref empty) (newref [<]) (newref empty) (newref False) |]
+  pure (EL spawnImpl cedeImpl parkImpl unparkImpl st)

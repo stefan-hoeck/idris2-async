@@ -1,6 +1,7 @@
 ||| Utilities for working with work loops.
 module IO.Async.Loop
 
+import Data.Linear.Unique
 import public Data.Linear.Ref1
 
 %default total
@@ -33,6 +34,8 @@ record Package (e : Type) where
 public export
 record EventLoop (e : Type) where
   constructor EL
-  spawn : Package e -> IO1 ()
-  cede  : Package e -> IO1 ()
-  init  : e
+  spawn  : Package e -> IO1 ()
+  cede   : Package e -> IO1 ()
+  park   : e -> Token World -> IO1 () -> IO1 ()
+  unpark : e -> Token World -> IO1 ()
+  init   : e

@@ -73,6 +73,8 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
 
   Asnc   : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> Async e es a
 
+  Wait   : Once World (Outcome es a) -> Async e es a
+
   -- Temporarily undo a layer of uncancelability
   APoll  : Token World -> Nat -> Async e es a -> Async e es a
 
@@ -344,18 +346,28 @@ parameters (limit   : Nat)
         let o  # t := onceOf1 (Outcome es a) t
             c1 # t := f (putOnce1 o . toOutcome) t
             c2 # t := observeCancel o cm fbr t
+            es # t := read1 fbr.env t
          in case peekOnce1 o t of
               Nothing  # t =>
-                let _ # t := observeOnce1 o (\out,t => case out of
-                               Succeeded r => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Val r) cm cc fbr st) t
-                               Error     x => let _ # t := c2 t in el.spawn (Pkg fbr.env $ run el (Err x) cm cc fbr st) t
-                               Canceled    => let _ # t := c1 t in el.spawn (Pkg fbr.env $ run el (pure ()) 1 cc fbr (hooks st)) t
+                let _ # t := el.park es fbr.token (run el (Wait o) cm cc fbr st) t
+                    _ # t := observeOnce1 o (\out,t => case out of
+                               Succeeded r => let _ # t := c2 t in el.unpark es fbr.token t
+                               Error     x => let _ # t := c2 t in el.unpark es fbr.token t
+                               Canceled    => let _ # t := c1 t in el.unpark es fbr.token t
                              ) t
                  in () # t
               Just out # t => case out of
                 Succeeded r => let _ # t := c2 t in run el (Val r) cm cc fbr st t
                 Error     x => let _ # t := c2 t in run el (Err x) cm cc fbr st t
                 Canceled    => let _ # t := c1 t in run el (pure ()) 1 cc fbr (hooks st) t
+
+      Wait o =>
+        case peekOnce1 o t of
+          Just res # t => case res of
+            Succeeded r => run el (Val r) cm cc fbr st t
+            Error     x => run el (Err x) cm cc fbr st t
+            Canceled    => run el (pure ()) 1 cc fbr (hooks st) t
+          _ => assert_total $ idris_crash "Fiber.run case Wait: empty Once!"
 
       APoll tok k x => case tok == fbr.token && k == cm of
         True  => run el x (pred cm) cc fbr (Inc :: st) t
