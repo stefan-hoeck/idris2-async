@@ -64,9 +64,6 @@ record Poll where
   ||| Work queues of all worker threads
   queues   : IOArray size (Queue Task)
 
-  ||| Last ceded task
-  ceded    : IORef (Maybe Task)
-
   ||| The state used for polling file descriptors
   poller   : Poller
 
@@ -80,6 +77,9 @@ record Poll where
 
   ||| State for the signal handler
   signals : Sighandler
+
+  ||| Signals to other works if this needs be woken up
+  asleep : IORef Bool
 
 Task = Package Poll
 
@@ -96,9 +96,9 @@ workST me mkPoll queues stealers =
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
-        ceded # t := ref1 Nothing t
         poll  # t := mkPoll t
-     in W n me alive queues ceded poll stealers tim sigh # t
+        asleep # t := ref1 False t
+     in W n me alive queues poll stealers tim sigh asleep # t
 
 %inline
 release : Poll -> IO1 ()
@@ -130,25 +130,19 @@ parameters (s : Poll)
            _ # t := casmodify s.queues s.me (enqall tl) t
         in Just h # t
 
-  -- Looks for the next task to run. If possible, this will be the
-  -- last ceded task of this work loop, unless our queue is non-empty,
-  -- in which case the ceded task has to be appended to the queue.
-  --
   -- If there is no task, we go stealing from other work loops unless
   -- too many stealers are already active.
   %inline
   next : IO1 (Maybe Task)
   next t =
-    case read1 s.ceded t of
-      Nothing # t => case casupdate s.queues s.me deq t of
-        Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
-          0   # t => Nothing # t
-          S k # t =>
-           let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
-               _   # t := casmod1 s.stealers S t
-            in tsk # t
-        tsk # t => tsk # t
-      tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
+    case casupdate s.queues s.me deq t of
+      Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
+        0   # t => Nothing # t
+        S k # t =>
+         let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
+             _   # t := casmod1 s.stealers S t
+          in tsk # t
+      tsk # t => tsk # t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -181,7 +175,9 @@ parameters (s : Poll)
                Just tsk # t => let _ # t := tsk.act t in loop k t
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
+                    _ # t := write1 s.asleep True t
                     _ # t := s.poller.pollWait (sleepDuration r) t
+                    _ # t := write1 s.asleep False t
                   in loop POLL_ITER t
 
 --------------------------------------------------------------------------------
@@ -224,7 +220,8 @@ submit : Task -> IO1 ()
 submit p t =
   let st # t := read1 p.env t
       _  # t := casmodify st.queues st.me (enq p) t
-   in st.poller.interrupt t
+      b  # t := read1 st.asleep t
+   in when1 b (st.poller.interrupt) t
 
 cede : Task -> IO1 ()
 cede p t =
