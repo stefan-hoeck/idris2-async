@@ -43,7 +43,9 @@ embed oc Canceled        = oc
 ||| produces and outcome, and returns the outcome produced.
 export %inline
 join : Fiber es a -> Async e fs (Outcome es a)
-join f = primAsync $ \cb => f.observe_ $ cb . Right
+join f = do
+  me <- self
+  primAsync $ \cb => f.observe_ me $ cb . Right
 
 ||| Awaits the termination of a fiber ignoring its outcome.
 export %inline
@@ -88,16 +90,19 @@ awaitOnce o = primAsync $ \cb => observeOnce1 o (cb . Right)
 ||| Awaits the completion of a `Deferred a`.
 export %inline
 await : Deferred World a -> Async e es a
-await d = primAsync $ \cb => observeDeferred1 d (cb . Right)
+await d = do
+  me <- self
+  primAsync $ \cb => observeDeferredAs1 d me (cb . Right)
 
 listenPair :
      Fiber es a
   -> Fiber fs b
   -> Async e gs (Either (Outcome es a, Fiber fs b) (Fiber es a, Outcome fs b))
-listenPair f1 f2 =
+listenPair f1 f2 = do
+  me <- self
   primAsync $ \cb,t =>
-    let c1 # t := f1.observe_ (\o => cb (Right $ Left  (o, f2))) t
-        c2 # t := f2.observe_ (\o => cb (Right $ Right (f1, o))) t
+    let c1 # t := f1.observe_ me (\o => cb (Right $ Left  (o, f2))) t
+        c2 # t := f2.observe_ me (\o => cb (Right $ Right (f1, o))) t
      in (\t => let _ # t := c1 t in c2 t) # t
 
 ||| A low-level primitive for racing the evaluation of two fibers that returns the [[Outcome]]
