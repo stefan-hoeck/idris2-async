@@ -13,27 +13,21 @@ import Data.Nat
 export
 record Queue a where
   constructor Q
-  asleep : Bool
   head   : List a
   tail   : SnocList a
 
 export %inline
 queueOf : (0 a : Type) -> Queue a
-queueOf _ = Q False [] [<]
-
-export
-isEmpty : Queue a -> Bool
-isEmpty (Q _ [] [<]) = True
-isEmpty _            = False
+queueOf _ = Q [] [<]
 
 ||| Enqueues a value returning whether the loop belonging to
 ||| this queue is currently running.
 |||
 ||| This can be invoked from any thread.
 export %inline
-enq : a -> Queue a -> (Queue a, Bool)
-enq pkg (Q asleep [] [<]) = (Q asleep [pkg] [<], asleep)
-enq pkg (Q asleep h  t)   = (Q asleep h (t:<pkg), asleep)
+enq : a -> Queue a -> Queue a
+enq pkg (Q [] [<]) = Q [pkg] [<]
+enq pkg (Q h  t)   = Q h (t:<pkg)
 
 ||| Enqueues a list of values.
 |||
@@ -41,8 +35,8 @@ enq pkg (Q asleep h  t)   = (Q asleep h (t:<pkg), asleep)
 ||| flag to `False`.
 export %inline
 enqall : List a -> Queue a -> Queue a
-enqall pkgs (Q asleep [] [<]) = Q False pkgs [<]
-enqall pkgs (Q asleep h  t)   = Q False h (t <>< pkgs)
+enqall pkgs (Q [] [<]) = Q pkgs [<]
+enqall pkgs (Q h  t)   = Q h (t <>< pkgs)
 
 ||| Removes the first task from the queue.
 |||
@@ -50,24 +44,12 @@ enqall pkgs (Q asleep h  t)   = Q False h (t <>< pkgs)
 ||| so the `asleep` flag is always set to `False`.
 export %inline
 deq : Queue a -> (Queue a, Maybe a)
-deq (Q asleep h t) =
+deq (Q h t) =
   case h of
-    x::y => (Q False y t, Just x)
+    x::y => (Q y t, Just x)
     []   => case t <>> [] of
-      x::y => (Q False y [<], Just x)
-      []   => (Q False [] [<], Nothing)
-
-||| Like `deq`, but sets the `asleep` flag to `True` in case
-||| no item was found. This is used as the last step before
-||| sending the current loop to sleep.
-export %inline
-deqAndSleep : Queue a -> (Queue a,Maybe a)
-deqAndSleep (Q asleep h t) =
-  case h of
-    x::y => (Q False y t, Just x)
-    []   => case t <>> [] of
-      x::y => (Q False y [<], Just x)
-      []   => (Q True [] [<], Nothing)
+      x::y => (Q y [<], Just x)
+      []   => (Q [] [<], Nothing)
 
 --------------------------------------------------------------------------------
 -- Work stealing
@@ -114,9 +96,9 @@ splitTail n     res []     sx     =
 ||| the enqueued tasks (rounded up).
 export
 steal : Queue a -> (Queue a,List a)
-steal st@(Q _ [] [<]) = (st,[])
-steal (Q a h [<])     = let (h2,res) := splitHead h in (Q a h2 [<],res)
-steal (Q a h t)       = let (t2,res) := splitTail STEAL_MAX [] h t in (Q a h t2,res)
+steal st@(Q [] [<]) = (st,[])
+steal (Q h [<])     = let (h2,res) := splitHead h in (Q h2 [<],res)
+steal (Q h t)       = let (t2,res) := splitTail STEAL_MAX [] h t in (Q h t2,res)
 
 --------------------------------------------------------------------------------
 -- Tests and Proofs

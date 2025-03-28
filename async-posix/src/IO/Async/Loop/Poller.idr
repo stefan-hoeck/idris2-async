@@ -46,10 +46,11 @@ hdummy = \_ => unit1
 public export
 record Poller where
   constructor MkPoller
-  poll     : IO1 ()
-  pollWait : Clock Duration -> IO1 ()
-  release  : IO1 ()
-  pollFile :
+  poll      : IO1 ()
+  pollWait  : Clock Duration -> IO1 ()
+  release   : IO1 ()
+  interrupt : IO1 ()
+  pollFile  :
        (fd        : Fd)
     -> (ev        : PollEvent)
     -> (autoClose : Bool)
@@ -153,4 +154,4 @@ posixPoller : IO1 Poller
 posixPoller t =
   let ref # t := ref1 SortedMap.empty t
       px      := PX ref
-   in MkPoller (pollImpl px) (pollWaitImpl px) unit1 (pollFileImpl px) # t
+   in MkPoller (pollImpl px) (pollWaitImpl px) unit1 unit1 (pollFileImpl px) # t

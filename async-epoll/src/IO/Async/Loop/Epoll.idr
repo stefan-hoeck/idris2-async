@@ -26,6 +26,7 @@ import public IO.Async.Loop.SignalH
 import System
 import System.Clock
 import System.Linux.Epoll.Prim
+import System.Linux.Eventfd.Prim
 import System.Posix.File.Prim
 import System.Posix.Limits
 
@@ -54,6 +55,9 @@ record Epoll where
   ||| C array used to store file events during polling.
   events   : CArrayIO maxFiles SEpollEvent
 
+  ||| Event file descriptor used for waking up a sleeping poller
+  wakeup   : Eventfd
+
   ||| The `epoll` file descriptor used for polling
   epoll    : Epollfd
 
@@ -63,14 +67,19 @@ mkEpoll t =
       waiting # t := ref1 Z t
       handles # t := marray1 maxfiles hdummy t
       events  # t := malloc1 SEpollEvent maxfiles t
+      wakeup  # t := dieOnErr (eventfd 0 0) t
       epoll   # t := dieOnErr (epollCreate 0) t
-   in P waiting maxfiles handles events epoll # t
+   in P waiting maxfiles handles events wakeup epoll # t
 
 --------------------------------------------------------------------------------
 -- Polling for File Events
 --------------------------------------------------------------------------------
 
 parameters (p : Epoll)
+
+  %inline
+  wakeupImpl : IO1 ()
+  wakeupImpl = dieOnErr (writeEventfd p.wakeup 1)
 
   %inline
   getHandle : Fd -> IO1 FileHandle
@@ -104,6 +113,7 @@ parameters (p : Epoll)
   release : IO1 ()
   release t =
     let _ # t := free1 p.events t
+        _ # t := toF1 (close' p.wakeup) t
      in toF1 (close' p.epoll) t
 
 --------------------------------------------------------------------------------
@@ -198,12 +208,32 @@ parameters (p         : Epoll)
           in once r (cleanup v) # t
       Nothing => abrt (Left EINVAL) t
 
+readEv : Eventfd -> IO1 ()
+readEv fd t =
+  case readEventfd {es = [Errno]} fd t of
+    E _ t => () # t
+    R _ t => () # t
+
+setupWakeup : Epoll -> IO1 ()
+setupWakeup p t =
+  case tryNatToFin (cast $ (cast p.wakeup).fd) of
+    Nothing => () # t
+    Just x  =>
+     let _ # t := dieOnErr (epollCtl p.epoll Add p.wakeup POLLIN) t
+      in AC.set p.handles x (\e => readEv p.wakeup) t
+
 ||| Initialize the state of a Linux epoll poller.
 export
 epollPoller : IO1 Poller
 epollPoller t =
   let ep # t := mkEpoll t
-   in MkPoller (pollImpl ep) (pollWaitImpl ep) (release ep) (pollFileImpl ep) # t
+      _  # t := setupWakeup ep t
+   in MkPoller
+        (pollImpl ep)
+        (pollWaitImpl ep)
+        (release ep)
+        (wakeupImpl ep)
+        (pollFileImpl ep) # t
 
 ||| Simplified version of `app`.
 |||

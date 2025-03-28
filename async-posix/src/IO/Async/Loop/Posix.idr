@@ -32,7 +32,6 @@ import IO.Async.Loop.TimerST
 import IO.Async.Signal
 
 import System
-import System.Concurrency
 import System.Posix.File.Prim
 import System.Posix.Poll.Prim
 import System.Posix.Limits
@@ -82,36 +81,28 @@ record Poll where
   ||| State for the signal handler
   signals : Sighandler
 
-  ||| Mutex used for sleeping
-  lock    : Mutex
-
-  ||| Condition used for sleeping
-  cond    : Condition
-
 Task = Package Poll
 
 -- initialize the state of a worker thread.
 workST :
      {n : Nat}
   -> Fin n
-  -> (poll     : Poller)
+  -> (mkPoll   : IO1 Poller)
   -> IOArray n (Queue Task)
   -> (stealers : IORef Nat)
   -> IO Poll
-workST me poll queues stealers =
+workST me mkPoll queues stealers =
   runIO $ \t =>
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
         ceded # t := ref1 Nothing t
-        lock  # t := ioToF1 makeMutex t
-        cond  # t := ioToF1 makeCondition t
-     in W n me alive queues ceded poll stealers tim sigh lock cond # t
+        poll  # t := mkPoll t
+     in W n me alive queues ceded poll stealers tim sigh # t
 
+%inline
 release : Poll -> IO1 ()
-release p t = () # t
-  -- let _ # t := ffi (destroyCond p.cond) t
-  --  in ffi (destroyMutex p.lock) t
+release p = p.poller.release
 
 --------------------------------------------------------------------------------
 -- Work Loop
@@ -121,9 +112,9 @@ nextFin : {n : _} -> Fin n -> Fin n
 nextFin FZ     = last
 nextFin (FS x) = weaken x
 
-sleepDuration : Integer -> Int -- Clock Duration
-sleepDuration 0 = 20_000
-sleepDuration n = (min (cast $ n `div` 1000) 20_000) -- at most two milli seconds
+sleepDuration : Integer -> Clock Duration
+sleepDuration 0 = 2.ms
+sleepDuration n = (cast $ min n 2_000_000).ns -- at most two milli seconds
 
 parameters (s : Poll)
 
@@ -178,6 +169,7 @@ parameters (s : Poll)
         -- and continue.
         0   =>
          let _ # t := checkSignals s.signals t
+             _ # t := s.poller.poll t
           in loop POLL_ITER t
 
         -- No time for polling. Check timers and get the next task to run -
@@ -189,17 +181,8 @@ parameters (s : Poll)
                Just tsk # t => let _ # t := tsk.act t in loop k t
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
-                    _ # t := ioToF1 (mutexAcquire s.lock) t
-                 in case casupdate s.queues s.me deqAndSleep t of
-                      Just tsk # t =>
-                        let _ # t := ioToF1 (mutexRelease s.lock) t
-                            _ # t := tsk.act t
-                         in loop POLL_ITER t 
-                      Nothing  # t =>
-                       let d     := sleepDuration r
-                           _ # t := ioToF1 (conditionWaitTimeout s.cond s.lock  d) t
-                           _ # t := ioToF1 (mutexRelease s.lock) t
-                        in loop POLL_ITER t
+                    _ # t := s.poller.pollWait (sleepDuration r) t
+                  in loop POLL_ITER t
 
 --------------------------------------------------------------------------------
 -- Interfaces
@@ -232,7 +215,6 @@ record ThreadPool where
   constructor TP
   size    : Nat
   ids     : Vect size ThreadID
-  pollid  : ThreadID
   workers : Vect (S size) Poll
 
 stop : ThreadPool -> IO ()
@@ -240,42 +222,28 @@ stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 
 submit : Task -> IO1 ()
 submit p t =
-  let st   # t := read1 p.env t
-      True # t := casupdate st.queues st.me (enq p) t | False # t => () # t
-      _    # t := ioToF1 (mutexAcquire st.lock) t
-      _    # t := ioToF1 (conditionSignal st.cond) t
-   in ioToF1 (mutexRelease st.lock) t
+  let st # t := read1 p.env t
+      _  # t := casmodify st.queues st.me (enq p) t
+   in st.poller.interrupt t
 
 cede : Task -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
-      q  # t := AC.get st.queues st.me t
-   in case isEmpty q of
-        True  => write1 st.ceded (Just p) t
-        False =>
-         let _ # t := casupdate st.queues st.me (enq p) t
-          in () # t
+   in casmodify st.queues st.me (enq p) t
 
 workSTs :
      {n : _}
-  -> (poll : Poller)
+  -> (mkPoll : IO1 Poller)
   -> IOArray n (Queue Task)
   -> (stealers : IORef Nat)
   -> (k : Nat)
   -> {auto 0 lte : LTE k n}
   -> IO (Vect k Poll)
-workSTs poll qs stealers 0     = pure []
-workSTs poll qs stealers (S k) = do
-  w  <- workST (natToFinLT k) poll qs stealers
-  ws <- workSTs poll qs stealers k
+workSTs mkPoll qs stealers 0     = pure []
+workSTs mkPoll qs stealers (S k) = do
+  w  <- workST (natToFinLT k) mkPoll qs stealers
+  ws <- workSTs mkPoll qs stealers k
   pure (w::ws)
-
-covering
-pollLoop : (alive : Ref World Bool) -> Poller -> IO1 ()
-pollLoop ref p t =
-  let True # t := read1 ref t | _ # t => p.release t
-      _    # t := p.pollWait 10.ms t
-   in pollLoop ref p t
 
 ||| Create a new thread pool of `n` worker threads and additional
 covering
@@ -286,11 +254,9 @@ mkThreadPool :
 mkThreadPool (Element (S k) _) mkPoll = do
   qs <- marray (S k) (queueOf Task)
   ss <- newref (S Z)
-  pl <- runIO mkPoll
-  ws <- workSTs pl qs ss (S k)
+  ws <- workSTs mkPoll qs ss (S k)
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
-  pi <- fork (runIO $ pollLoop (head ws).alive pl)
-  let tp := TP k ts pi ws
+  let tp := TP k ts ws
   pure (tp, EL submit cede (head ws))
 
 toIO : Elin World [Errno] () -> IO ()
@@ -318,7 +284,6 @@ app n sigs mkPoll prog = do
   runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
   traverse_ (\w => runIO (release w)) tp.workers
-  threadWait tp.pollid
   usleep 100
 
 ||| Reads environment variable `IDRIS2_ASYNC_THREADS` and returns
