@@ -34,7 +34,7 @@ public export
 record Fiber (es : List Type) (a : Type) where
   constructor MkFiber
   cancel_  : IO1 ()
-  observe_ : Callback es a -> IO1 (IO1 ())
+  observe_ : Token World -> Callback es a -> IO1 (IO1 ())
 
 export
 data Async : (e : Type) -> (es : List Type) -> Type -> Type where
@@ -65,6 +65,9 @@ data Async : (e : Type) -> (es : List Type) -> Type -> Type where
   -- Returns the context currently handling this fiber, giving us access
   -- to functionality specific to the running event loop.
   Env  : Async e es e
+
+  -- Returns the current fiber's token
+  Self : Async e es (Token World)
 
   -- Cedes control to the execution context
   Cede : Async e es ()
@@ -111,6 +114,10 @@ cede = Cede
 export %inline
 env : Async e es e
 env = Env
+
+export %inline
+self : Async e es (Token World)
+self = Self
 
 --------------------------------------------------------------------------------
 -- Fiber Implementation (Here be Dragons)
@@ -176,7 +183,7 @@ finalize : FiberImpl e es a -> Outcome es a -> IO1 ()
 finalize fbr o = putDeferred1 fbr.res o
 
 toFiber : FiberImpl e es a -> Fiber es a
-toFiber fbr = MkFiber (putOnce1 fbr.cncl ()) (observeDeferred1 fbr.res)
+toFiber fbr = MkFiber (putOnce1 fbr.cncl ()) (observeDeferredAs1 fbr.res)
 
 --------------------------------------------------------------------------------
 -- Async Runner (More Dragons)
@@ -209,7 +216,7 @@ observeCancel _ _ _ = (unit1 #)
 
 -- a fiber that has already completed with the given result.
 synchronous : Outcome es a -> Fiber es a
-synchronous o = MkFiber unit1 (\cb,t => let _ # t := cb o t in unit1 # t)
+synchronous o = MkFiber unit1 (\_,cb,t => let _ # t := cb o t in unit1 # t)
 
 -- a fiber from an asynchronous computation.
 asynchronous : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> IO1 (Fiber es a)
@@ -217,7 +224,7 @@ asynchronous install t =
   let def     # t := deferredOf1 (Outcome es a) t
       cleanup # t := install (putDeferred1 def . toOutcome) t
       cncl        := T1.do cleanup; putDeferred1 def Canceled
-   in MkFiber cncl (observeDeferred1 def) # t
+   in MkFiber cncl (observeDeferredAs1 def) # t
 
 parameters (limit   : Nat)
 
@@ -284,6 +291,7 @@ parameters (limit   : Nat)
     case act of
       Bind x f => case x of
         Val x => run el (f x) cm cc fbr st t
+        Self  => run el (f fbr.token) cm cc fbr st t
         _     => run el x cm cc fbr (Bnd (either Err f) :: st) t
 
       Val x      => case st of
@@ -315,6 +323,7 @@ parameters (limit   : Nat)
         Cancel => run el (pure $ synchronous Canceled) cm cc fbr st t
         Val v  => run el (pure $ synchronous (Succeeded v)) cm cc fbr st t
         Err x  => run el (pure $ synchronous (Error x)) cm cc fbr st t
+        Self   => run el (pure $ synchronous (Succeeded fbr.token)) cm cc fbr st t
         _ =>
           let fbr2 # t := newFiber el t
               _    # t := spawnFib el fbr2 x t
@@ -339,6 +348,8 @@ parameters (limit   : Nat)
          in run el (pure ev) cm cc fbr st t
 
       Cede        => cedeFbr el fbr (run el (pure ()) cm limit fbr st) t
+
+      Self        => run el (Val fbr.token) cm limit fbr st t
 
       Asnc f =>
         let o  # t := onceOf1 (Outcome es a) t
@@ -365,7 +376,7 @@ parameters (limit   : Nat)
   runAsyncWith : EventLoop e -> Async e es a -> (Outcome es a -> IO ()) -> IO ()
   runAsyncWith el act cb = runIO $ \t =>
     let fbr # t := newFiber el t
-        _   # t := observeDeferred1 fbr.res (\o => ioToF1 $ cb o) t
+        _   # t := observeDeferredAs1 fbr.res fbr.token (\o => ioToF1 $ cb o) t
      in spawnFib el fbr act t
   
   export covering %inline
