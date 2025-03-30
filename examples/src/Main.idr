@@ -10,6 +10,7 @@ import Example.CH63.Poll
 
 import IO.Async.Loop.Poller
 
+import Profile.All
 import Profile.Alloc
 import Profile.Async2
 import Profile.Bind
@@ -45,6 +46,7 @@ act = do
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
     "poll"                    :: t => Poll.prog t
+    "profile-all"             :: t => Profile.All.prog
     "profile-alloc"           :: t => Profile.Alloc.prog t
     "profile-async2"          :: t => Profile.Async2.prog t
     "profile-bind"            :: t => Profile.Bind.prog t

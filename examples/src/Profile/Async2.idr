@@ -28,6 +28,7 @@ parameters {auto has : Has Errno es}
     single k
     asyncs k
   
+  export
   measure : Nat -> Prog es ()
   measure n = do
     dur <- delta (asyncs n)

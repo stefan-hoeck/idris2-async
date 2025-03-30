@@ -30,6 +30,7 @@ parameters {auto has : Has Errno es}
     repeat n (start $ effect ref def)
     awaitOnce def
 
+  export
   measure : Nat -> Prog es ()
   measure n = do
     dur <- delta (spawn n)

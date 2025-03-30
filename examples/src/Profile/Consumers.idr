@@ -37,6 +37,7 @@ parameters {auto has : Has Errno es}
         loopc r
       Nothing => pure ()
 
+export
 measure : Has Errno es => Nat -> Prog es ()
 measure n = do
   d <- deferredOf {s = World} ()

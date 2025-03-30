@@ -37,6 +37,7 @@ parameters {auto has : Has Errno es}
     awaitOnce def
     
 
+  export
   measure : Nat -> Prog es ()
   measure n = do
     dur <- delta (iterate n)

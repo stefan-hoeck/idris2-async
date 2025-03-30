@@ -1,10 +1,8 @@
 module Profile.Alloc
 
 import Data.Array
-import IO.Async.BQueue
 import Opts
 import Profile.Util
-import System.Clock
 
 %default total
 
@@ -36,15 +34,16 @@ parameters {auto has : Has Errno es}
        then cede $> i
        else cede >> fiber (assert_smaller i (S i))
 
-  run : Prog es ()
+  run : Prog es Nat
   run = do
     fs <- traverse (\_ => start $ fiber 0) [0 .. pred 2500]
     os <- traverse join fs
-    prntLn $ sum (mapMaybe res os)
+    pure $ sum (mapMaybe res os)
 
+  export
   measure : Prog es ()
   measure = do
-    dur <- delta run
+    dur <- delta (ignore run)
     stdoutLn (prettyNS $ toNano dur)
 
   export

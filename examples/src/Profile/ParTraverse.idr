@@ -18,9 +18,10 @@ usage =
 
 parameters {auto has : Has Errno es}
   
+  export
   measure : Nat -> Prog es ()
   measure n = do
-    dur <- delta (parTraverse pure [0..n] >>= prntLn . maybe 0 sum)
+    dur <- delta (ignore $ parTraverse pure [0..n] >>= pure . maybe 0 sum)
     stdoutLn (prettyNS $ toNano dur `div` cast n)
 
   export
