@@ -11,6 +11,7 @@ import Example.CH63.Poll
 import IO.Async.Loop.Poller
 
 import Profile.Alloc
+import Profile.Async2
 import Profile.Bind
 import Profile.ChainedSpawn
 import Profile.Consumers
@@ -45,6 +46,7 @@ act = do
     "seek"                    :: t => Seek.prog t
     "poll"                    :: t => Poll.prog t
     "profile-alloc"           :: t => Profile.Alloc.prog t
+    "profile-async2"          :: t => Profile.Async2.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
     "profile-chained-spawn"   :: t => Profile.ChainedSpawn.prog t
     "profile-consumers"       :: t => Profile.Consumers.prog t
