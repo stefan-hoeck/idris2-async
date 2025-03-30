@@ -30,6 +30,7 @@ parameters {auto has : Has Errno es}
     _   <- start $ iterate def n
     awaitOnce def
 
+  export
   measure : Nat -> Prog es ()
   measure n = do
     dur <- delta (spawn n)

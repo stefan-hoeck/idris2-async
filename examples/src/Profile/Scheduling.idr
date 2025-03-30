@@ -31,15 +31,16 @@ parameters {auto has : Has Errno es}
        then cede >> pure j
        else cede >> fiber (assert_smaller k $ S j)
 
-  run : Prog es ()
+  run : Prog es Nat
   run = do
     fs <- traverse (start . fiber) [0 .. 1_000_000]
     os <- traverse join fs
-    prntLn $ sum (mapMaybe res os)
+    pure $ sum (mapMaybe res os)
 
+  export
   measure : Prog es ()
   measure = do
-    dur <- delta run
+    dur <- delta (ignore run)
     stdoutLn (prettyNS $ toNano dur)
 
   export

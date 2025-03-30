@@ -23,6 +23,7 @@ parameters {auto has : Has Errno es}
   binds 0     = pure ()
   binds (S k) = pure () >> binds k
 
+  export
   measure : Nat -> Prog es ()
   measure n = do
     dur <- delta (binds n)

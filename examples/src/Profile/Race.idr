@@ -26,18 +26,19 @@ usage =
   """
 
 parameters {auto has : Has Errno es}
-  iterate : Nat -> Nat -> (Nat -> Prog es Nat) -> Prog es ()
-  iterate tot 0     f = prntLn tot
+  iterate : Nat -> Nat -> (Nat -> Prog es Nat) -> Prog es Nat
+  iterate tot 0     f = pure tot
   iterate tot (S k) f = f k >>= \v => iterate (tot+v) k f
 
-  run : String -> Nat -> Prog es ()
+  run : String -> Nat -> Prog es Nat
   run "trivial" n = iterate 0 n $ \x => race2 never (pure x) id id 0
   run "single"  n = iterate 0 n $ \x => race2 never (pure () $> x) id id 0
   run _         n = iterate 0 n $ \x => race2 (pure () >> never) (pure () $> x) id id 0
 
+  export
   measure : String -> Nat -> Prog es ()
   measure tpe n = do
-    dur <- delta (run tpe n)
+    dur <- delta (ignore $ run tpe n)
     stdoutLn (prettyNS $ toNano dur `div` cast n)
 
   export
