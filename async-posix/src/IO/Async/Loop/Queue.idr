@@ -1,8 +1,29 @@
 module IO.Async.Loop.Queue
 
+import Data.Array.Core as AC
+import Data.Array.Mutable
+import Data.Linear.Ref1
 import Data.Nat
 
 %default total
+
+export
+inc : IORef Nat -> IO1 ()
+inc r t =
+  assert_total $
+   let v    # t := read1 r t
+       True # t := caswrite1 r v (S v) t | _ # t => inc r t
+    in () # t
+
+export
+dec : IORef Nat -> IO1 Bool
+dec r t = assert_total $ let v # t := read1 r t in go v v t
+  where
+    go : Nat -> Nat -> IO1 Bool
+    go x 0     t = False # t
+    go x (S k) t =
+      let True # t := caswrite1 r x k t | _ # t => dec r t
+       in True # t
 
 --------------------------------------------------------------------------------
 -- Task Queue and basic operations
@@ -26,48 +47,63 @@ isEmpty : Queue a -> Bool
 isEmpty (Q _ [] [<]) = True
 isEmpty _            = False
 
-||| Enqueues a value returning whether the loop belonging to
-||| this queue is currently running.
-|||
-||| This can be invoked from any thread.
-export %inline
-enq : a -> Queue a -> (Queue a, Bool)
-enq pkg (Q asleep [] [<]) = (Q asleep [pkg] [<], asleep)
-enq pkg (Q asleep h  t)   = (Q asleep h (t:<pkg), asleep)
+export
+enq : IOArray n (Queue a) -> Fin n -> a -> IO1 Bool
+enq r ix v t = assert_total $ let q # t := get r ix t in go q q t
+  where
+    go : Queue a -> Queue a -> IO1 Bool
+    go x (Q as [] [<]) t = case casset r ix x (Q as [v] [<]) t of
+      True # t => as # t
+      _    # t => enq r ix v t
+    go x (Q as h tl) t = case casset r ix x (Q as h (tl:<v)) t of
+      True # t => as # t
+      _    # t => enq r ix v t
 
-||| Enqueues a list of values.
-|||
-||| This happens only during work stealing, so we set the `asleep`
-||| flag to `False`.
-export %inline
-enqall : List a -> Queue a -> Queue a
-enqall pkgs (Q asleep [] [<]) = Q False pkgs [<]
-enqall pkgs (Q asleep h  t)   = Q False h (t <>< pkgs)
+export
+enqall : IOArray n (Queue a) -> Fin n -> List a -> IO1 Bool
+enqall r ix vs t = assert_total $ let q # t := get r ix t in go q q t
+  where
+    go : Queue a -> Queue a -> IO1 Bool
+    go x (Q as [] [<]) t = case casset r ix x (Q as vs [<]) t of
+      True # t => as # t
+      _    # t => enqall r ix vs t
+    go x (Q as h tl) t = case casset r ix x (Q as h (tl<><vs)) t of
+      True # t => as # t
+      _    # t => enqall r ix vs t
 
-||| Removes the first task from the queue.
-|||
-||| This is only invoked from the loop running the queue,
-||| so the `asleep` flag is always set to `False`.
-export %inline
-deq : Queue a -> (Queue a, Maybe a)
-deq (Q asleep h t) =
-  case h of
-    x::y => (Q False y t, Just x)
-    []   => case t <>> [] of
-      x::y => (Q False y [<], Just x)
-      []   => (Q False [] [<], Nothing)
+export
+deq : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
+deq r ix t = assert_total $ let q # t := get r ix t in go q q t
+  where
+    go : Queue a -> Queue a -> IO1 (Maybe a)
+    go x (Q as h tl) t =
+      case h of
+        y::z => case casset r ix x (Q False z tl) t of
+          True # t => Just y # t
+          _    # t => deq r ix t
+        []   => case tl <>> [] of
+          y::z => case casset r ix x (Q False z [<]) t of
+            True # t => Just y # t
+            _    # t => deq r ix t
+          []   => Nothing # t
 
-||| Like `deq`, but sets the `asleep` flag to `True` in case
-||| no item was found. This is used as the last step before
-||| sending the current loop to sleep.
-export %inline
-deqAndSleep : Queue a -> (Queue a,Maybe a)
-deqAndSleep (Q asleep h t) =
-  case h of
-    x::y => (Q False y t, Just x)
-    []   => case t <>> [] of
-      x::y => (Q False y [<], Just x)
-      []   => (Q True [] [<], Nothing)
+export
+deqAndSleep : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
+deqAndSleep r ix t = assert_total $ let q # t := get r ix t in go q q t
+  where
+    go : Queue a -> Queue a -> IO1 (Maybe a)
+    go x (Q as h tl) t =
+      case h of
+        y::z => case casset r ix x (Q False z tl) t of
+          True # t => Just y # t
+          _    # t => deq r ix t
+        []   => case tl <>> [] of
+          y::z => case casset r ix x (Q False z [<]) t of
+            True # t => Just y # t
+            _    # t => deq r ix t
+          []   => case casset r ix x (Q True [] [<]) t of
+            True # t => Nothing # t
+            _    # t => deq r ix t
 
 --------------------------------------------------------------------------------
 -- Work stealing
@@ -113,10 +149,21 @@ splitTail n     res []     sx     =
 ||| Steals up to `STEAL_MAX` tasks from a queue but not more than half
 ||| the enqueued tasks (rounded up).
 export
-steal : Queue a -> (Queue a,List a)
-steal st@(Q _ [] [<]) = (st,[])
-steal (Q a h [<])     = let (h2,res) := splitHead h in (Q a h2 [<],res)
-steal (Q a h t)       = let (t2,res) := splitTail STEAL_MAX [] h t in (Q a h t2,res)
+steal : IOArray n (Queue a) -> Fin n -> IO1 (List a)
+steal r ix t = assert_total $ let q # t := get r ix t in go q q t
+  where
+    go : Queue a -> Queue a -> IO1 (List a)
+    go x (Q _ [] [<]) t = [] # t
+    go x (Q a h  [<]) t =
+      let (h2,res) := splitHead h
+       in case casset r ix x (Q a h2 [<]) t of
+            True # t => res # t
+            _    # t => steal r ix t
+    go x (Q a h  tl)  t =
+      let (tl2,res) := splitTail STEAL_MAX [] h tl
+       in case casset r ix x (Q a h tl2) t of
+            True # t => res # t
+            _    # t => steal r ix t
 
 --------------------------------------------------------------------------------
 -- Tests and Proofs

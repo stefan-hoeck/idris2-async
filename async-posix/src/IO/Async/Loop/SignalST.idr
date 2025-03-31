@@ -17,15 +17,18 @@ record SignalST where
   map : SigMap
 
 
-await_ : List Signal -> (Siginfo -> IO1 ()) -> SignalST -> (SignalST, Nat)
-await_ sigs act (SST id m) = (SST (S id) (go sigs m), id)
+await_ : IORef SignalST -> List Signal -> (Siginfo -> IO1 ()) -> IO1 Nat
+await_ r sigs act t = 
+  let SST id m # t := read1 r t
+      _        # t := write1 r (SST (S id) (go id sigs m)) t
+   in id # t
   where
-    go : List Signal -> SigMap -> SigMap
-    go []     m = m
-    go (s::ss) m =
+    go : Nat -> List Signal -> SigMap -> SigMap
+    go id []     m = m
+    go id (s::ss) m =
       case lookup s m of
-        Nothing => go ss $ insert s [(id,act)] m
-        Just ps => go ss $ insert s ((id,act)::ps) m
+        Nothing => go id ss $ insert s [(id,act)] m
+        Just ps => go id ss $ insert s ((id,act)::ps) m
 
 drop_ : List Signal -> Nat -> SignalST -> SignalST
 drop_ []      x st         = st
@@ -35,6 +38,9 @@ drop_ (s::ss) x (SST id m) =
     Just vs => case filter ((x /=) . fst) vs of
       [] => drop_ ss x $ (SST id $ delete s m)
       ws => drop_ ss x $ (SST id $ insert s ws m)
+
+dropRef : IORef SignalST -> List Signal -> Nat -> IO1 ()
+dropRef r ss n t = let st # t := read1 r t in write1 r (drop_ ss n st) t
 
 %inline
 hasHandle : SignalST -> Signal -> Bool
@@ -67,8 +73,8 @@ parameters (si : Sighandler)
   export
   await : List Signal -> (Siginfo -> IO1 ()) -> IO1 (IO1 ())
   await sigs act t =
-    let ix # t := casupdate1 si.ref (await_ sigs act) t
-     in casmod1 si.ref (drop_ sigs ix) # t
+    let ix # t := await_ si.ref sigs act t
+     in dropRef si.ref sigs ix # t
 
   ||| Checks for pending signals and runs the corresponding
   ||| signal handlers (if any).

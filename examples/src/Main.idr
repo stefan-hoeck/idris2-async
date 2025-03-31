@@ -46,7 +46,6 @@ act = do
     "copyh"                   :: t => CopyWithHoles.prog t
     "seek"                    :: t => Seek.prog t
     "poll"                    :: t => Poll.prog t
-    "profile-all"             :: t => Profile.All.prog
     "profile-alloc"           :: t => Profile.Alloc.prog t
     "profile-async2"          :: t => Profile.Async2.prog t
     "profile-bind"            :: t => Profile.Bind.prog t
@@ -70,9 +69,11 @@ main = do
   _::t <- getArgs | _ => die "Invalid arguments"
   case isProfiling t of
     False => simpleApp $ handle handlers act
-    True  => do
-      n <- asyncThreads
-      app n [] posixPoller (handle handlers act)
+    True  => case t of
+      ["profile-all"] => Profile.All.run
+      _               => do
+        n <- asyncThreads
+        app n [] posixPoller (handle handlers act)
   exitSuccess
 
   where

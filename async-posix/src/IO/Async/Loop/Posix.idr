@@ -131,12 +131,12 @@ parameters (s : Poll)
   stealTasks : Fin s.size -> Nat -> IO1 (Maybe Task)
   stealTasks x 0     t = Nothing # t
   stealTasks x (S k) t =
-    case casupdate s.queues x steal t of
+    case steal s.queues x t of
       []    # t => stealTasks (nextFin x) k t
       h::tl # t =>
        let _ # t := write1 h.env s t
            _ # t := traverse1_ (\tsk => write1 tsk.env s) tl t
-           _ # t := casmodify s.queues s.me (enqall tl) t
+           _ # t := enqall s.queues s.me tl t
         in Just h # t
 
   -- Looks for the next task to run. If possible, this will be the
@@ -149,12 +149,12 @@ parameters (s : Poll)
   next : IO1 (Maybe Task)
   next t =
     case read1 s.ceded t of
-      Nothing # t => case casupdate s.queues s.me deq t of
-        Nothing # t => case casupdate1 s.stealers (\x => (pred x, x)) t of
-          0   # t => Nothing # t
-          S k # t =>
+      Nothing # t => case deq s.queues s.me t of
+        Nothing # t => case dec s.stealers t of
+          False # t => Nothing # t
+          True  # t =>
            let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
-               _   # t := casmod1 s.stealers S t
+               _   # t := Queue.inc s.stealers t
             in tsk # t
         tsk # t => tsk # t
       tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
@@ -190,7 +190,7 @@ parameters (s : Poll)
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
                     _ # t := ioToF1 (mutexAcquire s.lock) t
-                 in case casupdate s.queues s.me deqAndSleep t of
+                 in case deqAndSleep s.queues s.me t of
                       Just tsk # t =>
                         let _ # t := ioToF1 (mutexRelease s.lock) t
                             _ # t := tsk.act t
@@ -241,7 +241,7 @@ stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 submit : Task -> IO1 ()
 submit p t =
   let st   # t := read1 p.env t
-      True # t := casupdate st.queues st.me (enq p) t | False # t => () # t
+      True # t := enq st.queues st.me p t | False # t => () # t
       _    # t := ioToF1 (mutexAcquire st.lock) t
       _    # t := ioToF1 (conditionSignal st.cond) t
    in ioToF1 (mutexRelease st.lock) t
@@ -253,7 +253,7 @@ cede p t =
    in case isEmpty q of
         True  => write1 st.ceded (Just p) t
         False =>
-         let _ # t := casupdate st.queues st.me (enq p) t
+         let _ # t := enq st.queues st.me p t
           in () # t
 
 workSTs :

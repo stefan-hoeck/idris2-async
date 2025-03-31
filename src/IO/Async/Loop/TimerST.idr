@@ -17,12 +17,11 @@ record TimerST where
   id  : Nat
   map : SortedMap Integer (List (Nat, IO1 ()))
 
-%inline
-schedule_ : Integer -> IO1 () -> TimerST -> (TimerST, Nat)
+schedule_ : Integer -> IO1 () -> TimerST -> TimerST
 schedule_ ns act (TST id m) =
   case lookup ns m of
-    Nothing => (TST (S id) $ insert ns [(id,act)] m,     id)
-    Just ps => (TST (S id) $ insert ns ((id,act)::ps) m, id)
+    Nothing => TST (S id) $ insert ns [(id,act)] m
+    Just ps => TST (S id) $ insert ns ((id,act)::ps) m
 
 drop_ : Integer -> Nat -> TimerST -> TimerST
 drop_ ns x (TST id m) =
@@ -38,13 +37,16 @@ nanos t =
   let now # t := ioToF1 (clockTime Monotonic) t
    in toNano now # t
 
-nextDue : Integer -> TimerST -> (TimerST, Either Integer (List (Nat,IO1 ())))
-nextDue ns tst@(TST id m) =
-  case leftMost m of
-    Nothing       => (tst, Left 0)
-    Just (due,ps) => case ns >= due of
-      True  => (TST id $ delete due m, Right ps)
-      False => (tst, Left $ due - ns)
+nextDue : Integer -> IORef TimerST -> IO1 (Either Integer (List (Nat,IO1 ())))
+nextDue ns r t =
+  let (TST id m) # t := read1 r t
+   in case leftMost m of
+        Nothing       => Left 0 # t
+        Just (due,ps) => case ns >= due of
+          True  =>
+           let _ # t := write1 r (TST id $ delete due m) t
+            in Right ps # t
+          False => Left (due - ns) # t
 
 --------------------------------------------------------------------------------
 -- API
@@ -72,13 +74,14 @@ parameters (ti : Timer)
      in case end <= ns of
           True  => let _ # t := act t in unit1 # t
           False =>
-            let ix # t := casupdate1 ti.ref (schedule_ end act) t
-             in casmod1 ti.ref (drop_ end ix) # t
+            let tst # t := read1 ti.ref t
+                _   # t := write1 ti.ref (schedule_ end act tst) t
+             in mod1 ti.ref (drop_ end tst.id) # t
 
   export
   runDue : Integer -> IO1 Integer
   runDue now t =
-    case casupdate1 ti.ref (nextDue now) t of
+    case nextDue now ti.ref t of
       Right ps # t =>
        let _ # t := traverse1_ snd ps t
         in runDue (assert_smaller now now) t
