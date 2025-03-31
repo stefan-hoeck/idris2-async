@@ -16,17 +16,8 @@ import public IO.Async.Loop
 export
 once : (r : IORef Bool) -> (act : IO1 ()) -> IO1 ()
 once r act t =
-  case casupdate1 r (\b => (False,b)) t of
-    True  # t => act t
-    False # t => () # t
-
-export %inline
-enqAt : IOArray n (Queue a) -> Fin n -> a -> IO1 ()
-enqAt qs x v = casmodify qs x (`enqueue` v)
-
-export %inline
-deqAt : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
-deqAt qs x =
-  casupdate qs x $ \q => case dequeue q of
-    Just (v,q2) => (q2, Just v)
-    Nothing     => (q, Nothing)
+  assert_total $ case read1 r t of
+    True # t => case caswrite1 r True False t of
+      True # t => act t
+      _    # t => once r act t
+    _ # t => () # t

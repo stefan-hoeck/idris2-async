@@ -96,6 +96,20 @@ parameters (p : Posix)
     let m # t := read1 p.handles t
      in if null m then () # t else pollWaitImpl (makeDuration 0 0) t
 
+cleanup : Posix -> Fd -> IO1 ()
+cleanup p fd t =
+  assert_total $
+   let x    # t := read1 p.handles t
+       True # t := caswrite1 p.handles x (delete fd x) t | _ # t => cleanup p fd t
+    in () # t
+
+insrt : Posix -> Fd -> PollEvent -> FileHandle -> IO1 ()
+insrt p fd ev fh t =
+  assert_total $
+   let x    # t := read1 p.handles t
+       True # t := caswrite1 p.handles x (insert fd (ev,fh) x) t | _ # t => cleanup p fd t
+    in () # t
+
 --------------------------------------------------------------------------------
 -- Interfaces
 --------------------------------------------------------------------------------
@@ -112,17 +126,12 @@ parameters (p         : Posix)
   closefd : IO1 ()
   closefd = when1 autoClose (toF1 $ close' fd)
 
-  -- resets the file handle to `hdummy` and removes `fd` from the epoll set
-  %inline
-  cleanup : IO1 ()
-  cleanup = casmod1 p.handles (delete fd)
-
   -- invokes `cleanup` before running the file handle, and closes
   -- the file descriptor in case `autoClose` is set to `True`.
   %inline
   act : FileHandle
   act e t =
-    let _ # t := Poller.cleanup t
+    let _ # t := Poller.cleanup p fd t
         _ # t := cb (Right e) t
      in closefd t
 
@@ -130,7 +139,7 @@ parameters (p         : Posix)
   %inline
   cncl : FileHandle
   cncl e t =
-    let _ # t := Poller.cleanup t
+    let _ # t := Poller.cleanup p fd t
      in closefd t
 
   pollFileImpl : IO1 (IO1 ())
@@ -144,8 +153,8 @@ parameters (p         : Posix)
         -- cancelation, which might happen externally and from a different
         -- thread
         r  # t := ref1 True t
-        mp # t := casmod1 p.handles (insert fd (ev, \e => once r (act e))) t
-     in once r cleanup # t
+        _  # t := insrt p fd ev (once r . act) t
+     in once r (cleanup p fd) # t
 
 ||| initialize the state of a posix-compatible poller.
 export
