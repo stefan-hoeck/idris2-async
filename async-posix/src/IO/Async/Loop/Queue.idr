@@ -149,21 +149,33 @@ splitTail n     res []     sx     =
 ||| Steals up to `STEAL_MAX` tasks from a queue but not more than half
 ||| the enqueued tasks (rounded up).
 export
-steal : IOArray n (Queue a) -> Fin n -> IO1 (List a)
+steal : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
 steal r ix t = assert_total $ let q # t := get r ix t in go q q t
   where
-    go : Queue a -> Queue a -> IO1 (List a)
-    go x (Q _ [] [<]) t = [] # t
-    go x (Q a h  [<]) t =
-      let (h2,res) := splitHead h
-       in case casset r ix x (Q a h2 [<]) t of
-            True # t => res # t
+    go : Queue a -> Queue a -> IO1 (Maybe a)
+    go x (Q a hs ts) t =
+      case ts of
+        (rem:<v) => case casset r ix x (Q a hs rem) t of
+          True # t => Just v # t
+          _    # t => steal r ix t
+        [<] => case hs of
+          v::rem => case casset r ix x (Q a rem [<]) t of
+            True # t => Just v # t
             _    # t => steal r ix t
-    go x (Q a h  tl)  t =
-      let (tl2,res) := splitTail STEAL_MAX [] h tl
-       in case casset r ix x (Q a h tl2) t of
-            True # t => res # t
-            _    # t => steal r ix t
+          [] => Nothing # t
+  -- where
+  --   go : Queue a -> Queue a -> IO1 (List a)
+  --   go x (Q _ [] [<]) t = [] # t
+  --   go x (Q a h  [<]) t =
+  --     let (h2,res) := splitHead h
+  --      in case casset r ix x (Q a h2 [<]) t of
+  --           True # t => res # t
+  --           _    # t => steal r ix t
+  --   go x (Q a h  tl)  t =
+  --     let (tl2,res) := splitTail STEAL_MAX [] h tl
+  --      in case casset r ix x (Q a h tl2) t of
+  --           True # t => res # t
+  --           _    # t => steal r ix t
 
 --------------------------------------------------------------------------------
 -- Tests and Proofs
