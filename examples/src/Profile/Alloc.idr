@@ -1,6 +1,7 @@
 module Profile.Alloc
 
 import Data.Array
+import Data.Array.Mutable as AM
 import Opts
 import Profile.Util
 
@@ -16,7 +17,14 @@ usage =
   """
 
 allocation : Nat -> Array Nat
-allocation n = A _ $ generate (max 100 (min n 2000)) cast
+allocation n =
+  let sz := max 100 (min n 2000)
+   in A sz $ alloc sz 0 $ go sz
+
+  where
+    go : (k : Nat) -> (0 p : LTE k x) => MArray s x Nat -> F1 s (IArray x Nat)
+    go 0     arr t = unsafeFreeze arr t
+    go (S k) arr t = let _ # t := AM.setNat arr k k t in go k arr t
 
 res : Outcome es a -> Maybe a
 res (Succeeded x) = Just x

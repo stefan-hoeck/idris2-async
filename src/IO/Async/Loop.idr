@@ -1,6 +1,7 @@
 ||| Utilities for working with work loops.
 module IO.Async.Loop
 
+import Data.Nat
 import Data.Linear.Deferred
 import Data.Linear.Unique
 
@@ -33,11 +34,6 @@ newFiber t =
       res  # t := deferredOf1 (Outcome es a) t
    in FI tok cncl res # t
 
--- Finalize the fiber with the given outcome and call all its observers.
-%inline
-finalize : FiberImpl es a -> Outcome es a -> IO1 ()
-finalize fbr o = putDeferred1 fbr.res o
-
 toFiber : FiberImpl es a -> Fiber es a
 toFiber fbr = MkFiber (putOnce1 fbr.cncl ()) (observeDeferredAs1 fbr.res)
 
@@ -64,7 +60,6 @@ record FbrState (e : Type) where
   {0 curErrs, resErrs : List Type}
   {0 curType, resType : Type}
 
-  env   : e
   fiber : FiberImpl resErrs resType
   mask  : Nat -- cancellation mask
   comp  : Async e curErrs curType -- current computation
@@ -74,9 +69,6 @@ public export
 data RunRes : Type -> Type where
   Done : RunRes e
   Cont : FbrState e -> RunRes e
-
-export
-runFbr : FbrState e -> IO1 (RunRes e)
 
 ||| A context for submitting and running work packages asynchronously.
 |||
@@ -92,9 +84,29 @@ runFbr : FbrState e -> IO1 (RunRes e)
 ||| parameter `e`, representing the event loop currently processing a work
 ||| package.
 public export
-record EventLoop (e : Type) where
+interface EventLoop (0 e : Type) where
   constructor EL
-  spawn : FbrState e -> IO1 ()
+  spawn : e -> FbrState e -> IO1 ()
+  limit : Nat
+
+export
+runFbr : (el : EventLoop e) => e -> FbrState e -> IO1 (RunRes e)
+
+export
+runAsyncWith :
+     {auto el : EventLoop e}
+  -> e
+  -> Async e es a
+  -> (Outcome es a -> IO ())
+  -> IO ()
+runAsyncWith env act cb = runIO $ \t =>
+  let fbr # t := newFiber t
+      _   # t := observeDeferredAs1 fbr.res fbr.token (\o => ioToF1 $ cb o) t
+   in spawn env (FST fbr 0 act []) t
+
+export %inline
+runAsync : EventLoop e => e -> Async e es a -> IO ()
+runAsync env as = runAsyncWith env as (\_ => pure ())
 
 --------------------------------------------------------------------------------
 -- Async Runner (Here be Dragons)
@@ -124,12 +136,19 @@ asynchronous install t =
       cncl        := T1.do cleanup; putDeferred1 def Canceled
    in MkFiber cncl (observeDeferredAs1 def) # t
 
+%inline
+spawnFib : EventLoop e => e -> Nat -> FiberImpl es a -> Async e es a -> IO1 ()
+spawnFib ev mask fbr act = spawn ev (FST fbr mask act [])
+
+-- Finalize the fiber with the given outcome and call all its observers.
+%inline
+finalize : FiberImpl es a -> Outcome es a -> IO1 (RunRes e)
+finalize fbr o t = let _ # t := putDeferred1 fbr.res o t in Done # t
 
 -- Invokes runR or runC depending on if the fiber has
 -- been canceled and cancelation is currently observable
-covering
 run :
-     EventLoop e
+     {auto el : EventLoop e}
   -> (env : e)
   -> Async e es a
   -> (cancelMask  : Nat)
@@ -138,9 +157,8 @@ run :
   -> Stack e es fs a b
   -> IO1 (RunRes e)
 
-covering
 runR :
-     EventLoop e
+     {auto el : EventLoop e}
   -> (env : e)
   -> Async e es a
   -> (cancelMask  : Nat)
@@ -149,12 +167,120 @@ runR :
   -> Stack e es fs a b
   -> IO1 (RunRes e)
 
-covering
 runC :
-     EventLoop e
+     {auto el : EventLoop e}
   -> (env : e)
   -> Async e es a
   -> (cedeCount : Nat)
   -> FiberImpl fs b
   -> Stack e es fs a b
   -> IO1 (RunRes e)
+
+run env act cm 0     fbr st t = Cont (FST fbr cm act st) # t
+run env act 0  (S k) fbr st t =
+  case completedOnce1 fbr.cncl t of
+    False # t => runR env act 0 k fbr st t
+    True  # t => runC env act k fbr st t
+run env act c  (S k) fbr st t = runR env act c k fbr st t
+
+runC env act cc fbr st t =
+  case act of
+    UC f   => run env (f fbr.token 1) 1 cc fbr (Dec::st) t
+    Val x => case st of
+      Bnd f :: tl  => case f (Right x) of
+        UC g => run env (g fbr.token 1) 1 cc fbr (Dec::tl) t
+        a    => run env (pure ()) 1 cc fbr (hooks st) t
+      Inc :: tl    => run env (Val x) 1 cc fbr tl t
+      _           => run env (pure ()) 1 cc fbr (hooks st) t
+    Err x => case st of
+      Bnd f :: tl  => case f (Left x) of
+        UC g => run env (g fbr.token 1) 1 cc fbr (Dec::tl) t
+        a    => run env (pure ()) 1 cc fbr (hooks st) t
+      Inc :: tl    => run env (Err x) 1 cc fbr tl t
+      _           => run env (pure ()) 1 cc fbr (hooks st) t
+    _    => run env (pure ()) 1 cc fbr (hooks st) t
+
+runR env act cm cc fbr st t =
+  case act of
+    Bind x f => case x of
+      Val x => run env (f x) cm cc fbr st t
+      Self  => run env (f fbr.token) cm cc fbr st t
+      _     => run env x cm cc fbr (Bnd (either Err f) :: st) t
+
+    Val x      => case st of
+      Bnd f  :: tl => run env (f $ Right x) cm        cc fbr tl t
+      Inc    :: tl => run env act   (S cm)    cc fbr tl t
+      Dec    :: tl => run env act   (pred cm) cc fbr tl t
+      -- ignore cancel hook because cancelation is currently not
+      -- observable.
+      Hook h :: tl => run env act   cm        cc fbr tl t
+      Abort  :: tl => finalize fbr Canceled t
+      []          => finalize fbr (Succeeded x) t
+
+    Err x      => case st of
+      Bnd f  :: tl => run env (f $ Left x) cm        cc fbr tl t
+      Inc    :: tl => run env act   (S cm)    cc fbr tl t
+      Dec    :: tl => run env act   (pred cm) cc fbr tl t
+      -- ignore cancel hook because cancelation is currently not
+      -- observable.
+      Hook h :: tl => run env act   cm        cc fbr tl t
+      Abort  :: tl => finalize fbr Canceled t
+      []          => finalize fbr (Error x) t
+
+    -- For certain fibers it is not necessary to actually spawn them
+    -- on the event loop, so we optimize those away.
+    Start x     => case x of
+      Asnc reg =>
+        let f2 # t := asynchronous reg t
+         in run env (Val f2) cm cc fbr st t
+      Cancel => run env (Val $ synchronous Canceled) cm cc fbr st t
+      Val v  => run env (Val $ synchronous (Succeeded v)) cm cc fbr st t
+      Err x  => run env (Val $ synchronous (Error x)) cm cc fbr st t
+      Self   => run env (Val $ synchronous (Succeeded fbr.token)) cm cc fbr st t
+      _ =>
+        let fbr2 # t := newFiber t
+            _    # t := spawn env (FST fbr2 0 x []) t
+         in run env (Val $ toFiber fbr2) cm cc fbr st t
+
+    Sync x      =>
+      let r # t := ioToF1 x t
+       in run env (terminal r) cm cc fbr st t
+
+    Attempt x => run env x cm cc fbr (Bnd Val :: st) t
+
+    Cancel      => 
+      let _ # t := putOnce1 fbr.cncl () t
+       in run env (Val ()) cm cc fbr st t
+
+    OnCncl x y  => run env x cm cc fbr (Hook y :: st) t
+
+    UC f        => run env (f fbr.token (S cm)) (S cm) cc fbr (Dec::st) t
+
+    Env         => run env (Val env) cm cc fbr st t
+
+    Cede        => Cont (FST fbr cm (Val ()) st) # t
+
+    Self        => run env (Val fbr.token) cm cc fbr st t
+
+    Asnc f =>
+      let o  # t := onceOf1 (Outcome es a) t
+          c1 # t := f (putOnce1 o . toOutcome) t
+          c2 # t := observeCancel o cm fbr t
+       in case peekOnce1 o t of
+            Nothing  # t =>
+              let _ # t := observeOnce1 o (\out,t => case out of
+                             Succeeded r => let _ # t := c2 t in spawn env (FST fbr cm (Val r) st) t
+                             Error     x => let _ # t := c2 t in spawn env (FST fbr cm (Err x) st) t
+                             Canceled    => let _ # t := c1 t in spawn env (FST fbr 1  (Val ()) (hooks st)) t
+                           ) t
+               in Done # t
+            Just out # t => case out of
+              Succeeded r => let _ # t := c2 t in run env (Val r) cm cc fbr st t
+              Error     x => let _ # t := c2 t in run env (Err x) cm cc fbr st t
+              Canceled    => let _ # t := c1 t in run env (pure ()) 1 cc fbr (hooks st) t
+
+    APoll tok k x => case tok == fbr.token && k == cm of
+      True  => run env x (pred cm) cc fbr (Inc :: st) t
+      False => run env x cm        cc fbr st t
+
+runFbr env (FST fbr msk act st) = run env act msk (limit @{el}) fbr st

@@ -88,7 +88,7 @@ record Poll where
   ||| Condition used for sleeping
   cond    : Condition
 
-Task = Package Poll
+Task = FbrState Poll
 
 -- initialize the state of a worker thread.
 workST :
@@ -113,13 +113,27 @@ release p t = () # t
   -- let _ # t := ffi (destroyCond p.cond) t
   --  in ffi (destroyMutex p.lock) t
 
---------------------------------------------------------------------------------
--- Work Loop
---------------------------------------------------------------------------------
-
 debug : Lazy String -> IO1 ()
 debug s t = () # t
 -- debug s = ioToF1 (putStrLn s)
+
+submit : Poll -> Task -> IO1 ()
+submit st p t =
+  let _    # t := debug "submitting a fiber to \{show st.me}" t
+      True # t := enq st.queue p t | False # t => () # t
+      _    # t := debug "waking up \{show st.me}" t
+      _    # t := ioToF1 (mutexAcquire st.lock) t
+      _    # t := ioToF1 (conditionSignal st.cond) t
+   in ioToF1 (mutexRelease st.lock) t
+
+export %inline covering
+EventLoop Poll where
+  spawn = submit
+  limit = 1024
+
+--------------------------------------------------------------------------------
+-- Work Loop
+--------------------------------------------------------------------------------
 
 nextFin : {n : _} -> Fin n -> Fin n
 nextFin FZ     = last
@@ -141,7 +155,6 @@ parameters (s : Poll)
       Nothing # t => stealTasks (nextFin x) k t
       Just h  # t =>
        let _ # t := debug "\{show s.me} stole a fiber from \{show x} " t
-           _ # t := write1 h.env s t
         in Just h # t
 
   -- Looks for the next task to run. If possible, this will be the
@@ -166,6 +179,12 @@ parameters (s : Poll)
       tsk # t =>
        let _   # t := debug "\{show s.me} still got work to do" t
         in tsk # t
+
+  runTask : FbrState Poll -> IO1 ()
+  runTask fst t =
+    case runFbr s fst t of
+      Cont fst2 # t => let _ # t := enq s.queue fst2 t in () # t
+      Done      # t => () # t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -194,14 +213,14 @@ parameters (s : Poll)
         S k =>
          let r # t := runDueTimers s.timer t
           in case next t of
-               Just tsk # t => let _ # t := tsk.act t in loop k t
+               Just tsk # t => let _ # t := runTask tsk t in loop k t
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
                     _ # t := ioToF1 (mutexAcquire s.lock) t
                  in case deqAndSleep s.queue t of
                       Just tsk # t =>
                         let _ # t := ioToF1 (mutexRelease s.lock) t
-                            _ # t := tsk.act t
+                            _ # t := runTask tsk t
                          in loop POLL_ITER t 
                       Nothing  # t =>
                        let d     := sleepDuration r
@@ -247,22 +266,6 @@ record ThreadPool where
 stop : ThreadPool -> IO ()
 stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 
-submit : Task -> IO1 ()
-submit p t =
-  let st   # t := read1 p.env t
-      _    # t := debug "submitting a fiber to \{show st.me}" t
-      True # t := enq st.queue p t | False # t => () # t
-      _    # t := debug "waking up \{show st.me}" t
-      _    # t := ioToF1 (mutexAcquire st.lock) t
-      _    # t := ioToF1 (conditionSignal st.cond) t
-   in ioToF1 (mutexRelease st.lock) t
-
-cede : Task -> IO1 ()
-cede p t =
-  let st # t := read1 p.env t
-      _  # t := enq st.queue p t
-   in () # t
-
 workSTs :
      {n : _}
   -> (poll : Poller)
@@ -290,7 +293,7 @@ covering
 mkThreadPool :
      (n : Subset Nat IsSucc)
   -> (mkPoll : IO1 Poller)
-  -> IO (ThreadPool, EventLoop Poll)
+  -> IO ThreadPool
 mkThreadPool (Element (S k) _) mkPoll = do
   ps <- unsafeMArray {a = Poll} (S k)
   is <- runIO (unsafeFreeze ps)
@@ -299,8 +302,7 @@ mkThreadPool (Element (S k) _) mkPoll = do
   ws <- workSTs pl ps is ss (S k)
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   pi <- fork (runIO $ pollLoop (head ws).alive pl)
-  let tp := TP k ts pi ws
-  pure (tp, EL submit cede (head ws))
+  pure $ TP k ts pi ws
 
 toIO : Elin World [Errno] () -> IO ()
 toIO = ignore . runElinIO
@@ -322,8 +324,8 @@ app :
 app n sigs mkPoll prog = do
   toIO $ sigprocmask SIG_BLOCK sigs
   runIO (dieOnErr $ addFlags Stdin O_NONBLOCK)
-  (tp,el) <- mkThreadPool n mkPoll
-  runAsyncWith 1024 el prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
+  tp <- mkThreadPool n mkPoll
+  runAsyncWith (head tp.workers) prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
   runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
   traverse_ (\w => runIO (release w)) tp.workers

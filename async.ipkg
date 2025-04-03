@@ -10,10 +10,10 @@ depends = base >= 0.7.0
         , quantifiers-extra
 
 modules = IO.Async
+        , IO.Async.Core
         , IO.Async.BQueue
         , IO.Async.Channel
         , IO.Async.Semaphore
-        , IO.Async.Type
         , IO.Async.Util
 
         , IO.Async.Loop

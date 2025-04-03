@@ -33,7 +33,7 @@ record Fiber (es : List Type) (a : Type) where
   cancel_  : IO1 ()
   observe_ : IOToken -> Callback es a -> IO1 (IO1 ())
 
-export
+public export
 data Async : (e : Type) -> (es : List Type) -> Type -> Type where
   -- Implements bind (`>>=`)
   Bind   : Async e es a -> (a -> Async e es b) -> Async e es b
