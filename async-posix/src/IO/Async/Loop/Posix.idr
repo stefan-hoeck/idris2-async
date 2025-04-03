@@ -62,11 +62,11 @@ record Poll where
   ||| Reference indicating whether the pool is still alive
   alive    : IORef Bool
 
-  ||| Work queues of all worker threads
-  queues   : IOArray size (Queue Task)
+  ||| Work queue of this worker
+  queue    : IORef (Queue Task)
 
-  ||| Last ceded task
-  ceded    : IORef (Maybe Task)
+  ||| Work queues of all worker threads
+  workers  : IArray size Poll
 
   ||| The state used for polling file descriptors
   poller   : Poller
@@ -95,18 +95,18 @@ workST :
      {n : Nat}
   -> Fin n
   -> (poll     : Poller)
-  -> IOArray n (Queue Task)
+  -> (workers  : IArray n Poll)
   -> (stealers : IORef Nat)
   -> IO Poll
-workST me poll queues stealers =
+workST me poll workers stealers =
   runIO $ \t =>
     let alive # t := ref1 True t
         tim   # t := TimerST.timer t
         sigh  # t := sighandler t
-        ceded # t := ref1 Nothing t
+        que   # t := ref1 (queueOf Task) t
         lock  # t := ioToF1 makeMutex t
         cond  # t := ioToF1 makeCondition t
-     in W n me alive queues ceded poll stealers tim sigh lock cond # t
+     in W n me alive que workers poll stealers tim sigh lock cond # t
 
 release : Poll -> IO1 ()
 release p t = () # t
@@ -117,26 +117,31 @@ release p t = () # t
 -- Work Loop
 --------------------------------------------------------------------------------
 
+debug : Lazy String -> IO1 ()
+debug s t = () # t
+-- debug s = ioToF1 (putStrLn s)
+
 nextFin : {n : _} -> Fin n -> Fin n
 nextFin FZ     = last
 nextFin (FS x) = weaken x
 
 sleepDuration : Integer -> Int -- Clock Duration
-sleepDuration 0 = 20_000
-sleepDuration n = (min (cast $ n `div` 1000) 20_000) -- at most two milli seconds
+sleepDuration 0 = 2_000
+sleepDuration n = (min (cast $ n `div` 1000) 2_000) -- at most two milli seconds
 
 parameters (s : Poll)
 
   -- tries to steal a task from another worker
   stealTasks : Fin s.size -> Nat -> IO1 (Maybe Task)
-  stealTasks x 0     t = Nothing # t
+  stealTasks x 0     t =
+   let _ # t := debug "\{show s.me} could not steal anything" t
+    in Nothing # t
   stealTasks x (S k) t =
-    case steal s.queues x t of
-      []    # t => stealTasks (nextFin x) k t
-      h::tl # t =>
-       let _ # t := write1 h.env s t
-           _ # t := traverse1_ (\tsk => write1 tsk.env s) tl t
-           _ # t := enqall s.queues s.me tl t
+    case steal (queue $ at s.workers x) t of
+      Nothing # t => stealTasks (nextFin x) k t
+      Just h  # t =>
+       let _ # t := debug "\{show s.me} stole a fiber from \{show x} " t
+           _ # t := write1 h.env s t
         in Just h # t
 
   -- Looks for the next task to run. If possible, this will be the
@@ -148,16 +153,19 @@ parameters (s : Poll)
   %inline
   next : IO1 (Maybe Task)
   next t =
-    case read1 s.ceded t of
-      Nothing # t => case deq s.queues s.me t of
-        Nothing # t => case dec s.stealers t of
-          False # t => Nothing # t
-          True  # t =>
-           let tsk # t := stealTasks (nextFin s.me) (pred s.size) t
-               _   # t := Queue.inc s.stealers t
-            in tsk # t
-        tsk # t => tsk # t
-      tsk # t => let _ # t := write1 s.ceded Nothing t in tsk # t
+    case deq s.queue t of
+      Nothing # t => case dec s.stealers t of
+        False # t =>
+         let _ # t := debug "\{show s.me} enough stealers are active" t
+          in Nothing # t
+        True  # t =>
+         let _ # t := debug "\{show s.me} start stealing" t 
+             tsk # t := stealTasks (nextFin s.me) (pred s.size) t
+             _   # t := Queue.inc s.stealers t
+          in tsk # t
+      tsk # t =>
+       let _   # t := debug "\{show s.me} still got work to do" t
+        in tsk # t
 
   -- Main worker loop. If `cpoll` is at zero, this indicates that we should
   -- poll at this iteration. Otherwise we look for the next task to run.
@@ -190,13 +198,14 @@ parameters (s : Poll)
                Nothing  # t =>
                 let _ # t := checkSignals s.signals t
                     _ # t := ioToF1 (mutexAcquire s.lock) t
-                 in case deqAndSleep s.queues s.me t of
+                 in case deqAndSleep s.queue t of
                       Just tsk # t =>
                         let _ # t := ioToF1 (mutexRelease s.lock) t
                             _ # t := tsk.act t
                          in loop POLL_ITER t 
                       Nothing  # t =>
                        let d     := sleepDuration r
+                           _ # t := debug "\{show s.me} sleeping for \{show d} us" t
                            _ # t := ioToF1 (conditionWaitTimeout s.cond s.lock  d) t
                            _ # t := ioToF1 (mutexRelease s.lock) t
                         in loop POLL_ITER t
@@ -241,7 +250,9 @@ stop tp = runIO $ traverse1_ (\w => write1 w.alive False) tp.workers
 submit : Task -> IO1 ()
 submit p t =
   let st   # t := read1 p.env t
-      True # t := enq st.queues st.me p t | False # t => () # t
+      _    # t := debug "submitting a fiber to \{show st.me}" t
+      True # t := enq st.queue p t | False # t => () # t
+      _    # t := debug "waking up \{show st.me}" t
       _    # t := ioToF1 (mutexAcquire st.lock) t
       _    # t := ioToF1 (conditionSignal st.cond) t
    in ioToF1 (mutexRelease st.lock) t
@@ -249,26 +260,23 @@ submit p t =
 cede : Task -> IO1 ()
 cede p t =
   let st # t := read1 p.env t
-      q  # t := AC.get st.queues st.me t
-   in case isEmpty q of
-        True  => write1 st.ceded (Just p) t
-        False =>
-         let _ # t := enq st.queues st.me p t
-          in () # t
+      _  # t := enq st.queue p t
+   in () # t
 
 workSTs :
      {n : _}
   -> (poll : Poller)
-  -> IOArray n (Queue Task)
+  -> IOArray n Poll 
+  -> IArray n Poll 
   -> (stealers : IORef Nat)
   -> (k : Nat)
   -> {auto 0 lte : LTE k n}
-  -> IO (Vect k Poll)
-workSTs poll qs stealers 0     = pure []
-workSTs poll qs stealers (S k) = do
-  w  <- workST (natToFinLT k) poll qs stealers
-  ws <- workSTs poll qs stealers k
-  pure (w::ws)
+  -> IO (Vect n Poll)
+workSTs poll mps ips stealers 0     = pure (toVect ips)
+workSTs poll mps ips stealers (S k) = do
+  w  <- workST (natToFinLT k) poll ips stealers
+  runIO $ setNat mps k w
+  workSTs poll mps ips stealers k
 
 covering
 pollLoop : (alive : Ref World Bool) -> Poller -> IO1 ()
@@ -284,10 +292,11 @@ mkThreadPool :
   -> (mkPoll : IO1 Poller)
   -> IO (ThreadPool, EventLoop Poll)
 mkThreadPool (Element (S k) _) mkPoll = do
-  qs <- marray (S k) (queueOf Task)
+  ps <- unsafeMArray {a = Poll} (S k)
+  is <- runIO (unsafeFreeze ps)
   ss <- newref (S Z)
   pl <- runIO mkPoll
-  ws <- workSTs pl qs ss (S k)
+  ws <- workSTs pl ps is ss (S k)
   ts <- traverse (\x => fork (runIO $ loop x POLL_ITER)) (tail ws)
   pi <- fork (runIO $ pollLoop (head ws).alive pl)
   let tp := TP k ts pi ws

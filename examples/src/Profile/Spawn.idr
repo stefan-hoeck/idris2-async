@@ -1,6 +1,7 @@
 module Profile.Spawn
 
 import Data.Linear.Deferred
+import Data.Linear.Unique
 import Opts
 import Profile.Util
 import System.Clock
@@ -27,7 +28,9 @@ parameters {auto has : Has Errno es}
   spawn n = do
     def <- onceOf ()
     ref <- newref n
-    repeat n (start $ effect ref def)
+    me  <- self
+    repeat n (start (effect ref def))
+    -- repeat n (putStrLn "spawning a fibre on \{show me}" >> start (effect ref def))
     awaitOnce def
 
   export
