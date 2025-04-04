@@ -22,15 +22,14 @@ parameters {auto has : Has Errno es}
 
   ||| Listens on the given socket for incoming connections without blocking.
   export
-  acceptnb : Socket d -> Async e es (Maybe $ Socket d)
+  acceptnb : Socket d -> Async e es (Socket d)
   acceptnb sock = do
-    ev <- poll sock POLLIN
-    case hasEvent POLLIN ev of
-      False => pure Nothing
-      True  => ifError EAGAIN Nothing $ do
-        peer <- accept sock
-        addFlags peer O_NONBLOCK
-        pure (Just peer)
+    assert_total $ attempt (accept {es = [Errno]} sock) >>= \case
+      Right peer    => pure peer
+      Left (Here x) =>
+        if x == EINPROGRESS || x == EAGAIN
+           then ignore (poll sock POLLOUT) >> acceptnb sock
+           else throw x
 
   ||| Connects a socket to the given address.
   export
