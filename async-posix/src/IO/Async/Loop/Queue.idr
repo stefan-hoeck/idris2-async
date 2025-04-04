@@ -1,7 +1,5 @@
 module IO.Async.Loop.Queue
 
-import Data.Array.Core as AC
-import Data.Array.Mutable
 import Data.Linear.Ref1
 import Data.Nat
 
@@ -48,62 +46,62 @@ isEmpty (Q _ [] [<]) = True
 isEmpty _            = False
 
 export
-enq : IOArray n (Queue a) -> Fin n -> a -> IO1 Bool
-enq r ix v t = assert_total $ let q # t := get r ix t in go q q t
+enq : IORef (Queue a) -> a -> IO1 Bool
+enq r v t = assert_total $ let q # t := read1 r t in go q q t
   where
     go : Queue a -> Queue a -> IO1 Bool
-    go x (Q as [] [<]) t = case casset r ix x (Q as [v] [<]) t of
+    go x (Q as [] [<]) t = case caswrite1 r x (Q as [v] [<]) t of
       True # t => as # t
-      _    # t => enq r ix v t
-    go x (Q as h tl) t = case casset r ix x (Q as h (tl:<v)) t of
+      _    # t => enq r v t
+    go x (Q as h tl) t = case caswrite1 r x (Q as h (tl:<v)) t of
       True # t => as # t
-      _    # t => enq r ix v t
+      _    # t => enq r v t
 
 export
-enqall : IOArray n (Queue a) -> Fin n -> List a -> IO1 Bool
-enqall r ix vs t = assert_total $ let q # t := get r ix t in go q q t
+enqall : IORef (Queue a) -> List a -> IO1 Bool
+enqall r vs t = assert_total $ let q # t := read1 r t in go q q t
   where
     go : Queue a -> Queue a -> IO1 Bool
-    go x (Q as [] [<]) t = case casset r ix x (Q as vs [<]) t of
+    go x (Q as [] [<]) t = case caswrite1 r x (Q as vs [<]) t of
       True # t => as # t
-      _    # t => enqall r ix vs t
-    go x (Q as h tl) t = case casset r ix x (Q as h (tl<><vs)) t of
+      _    # t => enqall r vs t
+    go x (Q as h tl) t = case caswrite1 r x (Q as h (tl<><vs)) t of
       True # t => as # t
-      _    # t => enqall r ix vs t
+      _    # t => enqall r vs t
 
 export
-deq : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
-deq r ix t = assert_total $ let q # t := get r ix t in go q q t
+deq : IORef (Queue a) -> IO1 (Maybe a)
+deq r t = assert_total $ let q # t := read1 r t in go q q t
   where
     go : Queue a -> Queue a -> IO1 (Maybe a)
     go x (Q as h tl) t =
       case h of
-        y::z => case casset r ix x (Q False z tl) t of
+        y::z => case caswrite1 r x (Q False z tl) t of
           True # t => Just y # t
-          _    # t => deq r ix t
+          _    # t => deq r t
         []   => case tl <>> [] of
-          y::z => case casset r ix x (Q False z [<]) t of
+          y::z => case caswrite1 r x (Q False z [<]) t of
             True # t => Just y # t
-            _    # t => deq r ix t
+            _    # t => deq r t
           []   => Nothing # t
 
 export
-deqAndSleep : IOArray n (Queue a) -> Fin n -> IO1 (Maybe a)
-deqAndSleep r ix t = assert_total $ let q # t := get r ix t in go q q t
+deqAndSleep : IORef (Queue a) -> IO1 (Maybe a)
+deqAndSleep r t = assert_total $ let q # t := read1 r t in go q q t
   where
     go : Queue a -> Queue a -> IO1 (Maybe a)
     go x (Q as h tl) t =
       case h of
-        y::z => case casset r ix x (Q False z tl) t of
+        y::z => case caswrite1 r x (Q False z tl) t of
           True # t => Just y # t
-          _    # t => deq r ix t
+          _    # t => deq r t
         []   => case tl <>> [] of
-          y::z => case casset r ix x (Q False z [<]) t of
+          y::z => case caswrite1 r x (Q False z [<]) t of
             True # t => Just y # t
-            _    # t => deq r ix t
-          []   => case casset r ix x (Q True [] [<]) t of
+            _    # t => deq r t
+          []   => case caswrite1 r x (Q True [] [<]) t of
             True # t => Nothing # t
-            _    # t => deq r ix t
+            _    # t => deq r t
 
 --------------------------------------------------------------------------------
 -- Work stealing
@@ -149,21 +147,33 @@ splitTail n     res []     sx     =
 ||| Steals up to `STEAL_MAX` tasks from a queue but not more than half
 ||| the enqueued tasks (rounded up).
 export
-steal : IOArray n (Queue a) -> Fin n -> IO1 (List a)
-steal r ix t = assert_total $ let q # t := get r ix t in go q q t
+steal : IORef (Queue a) -> IO1 (Maybe a)
+steal r t = assert_total $ let q # t := read1 r t in go q q t
   where
-    go : Queue a -> Queue a -> IO1 (List a)
-    go x (Q _ [] [<]) t = [] # t
-    go x (Q a h  [<]) t =
-      let (h2,res) := splitHead h
-       in case casset r ix x (Q a h2 [<]) t of
-            True # t => res # t
-            _    # t => steal r ix t
-    go x (Q a h  tl)  t =
-      let (tl2,res) := splitTail STEAL_MAX [] h tl
-       in case casset r ix x (Q a h tl2) t of
-            True # t => res # t
-            _    # t => steal r ix t
+    go : Queue a -> Queue a -> IO1 (Maybe a)
+    go x (Q a hs ts) t =
+      case ts of
+        (rem:<v) => case caswrite1 r x (Q a hs rem) t of
+          True # t => Just v # t
+          _    # t => steal r t
+        [<] => case hs of
+          v::rem => case caswrite1 r x (Q a rem [<]) t of
+            True # t => Just v # t
+            _    # t => steal r t
+          [] => Nothing # t
+  -- where
+  --   go : Queue a -> Queue a -> IO1 (List a)
+  --   go x (Q _ [] [<]) t = [] # t
+  --   go x (Q a h  [<]) t =
+  --     let (h2,res) := splitHead h
+  --      in case caswrite1 r x (Q a h2 [<]) t of
+  --           True # t => res # t
+  --           _    # t => steal r t
+  --   go x (Q a h  tl)  t =
+  --     let (tl2,res) := splitTail STEAL_MAX [] h tl
+  --      in case caswrite1 r x (Q a h tl2) t of
+  --           True # t => res # t
+  --           _    # t => steal r t
 
 --------------------------------------------------------------------------------
 -- Tests and Proofs

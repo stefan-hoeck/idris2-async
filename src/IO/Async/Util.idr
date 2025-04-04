@@ -6,11 +6,11 @@ import Data.Array.Mutable
 import Data.Linear.Deferred
 import Data.Linear.Unique
 import Data.Maybe
+import IO.Async.Core
 import IO.Async.Internal.Ref
 import IO.Async.Loop.Sync
 import IO.Async.Loop.TimerH
 import IO.Async.Semaphore
-import IO.Async.Type
 import System.Clock
 
 %default total
@@ -436,4 +436,4 @@ export covering
 syncApp : Async SyncST [] () -> IO ()
 syncApp as = do
   el  <- sync
-  runAsync 1024 el as
+  runAsync el as

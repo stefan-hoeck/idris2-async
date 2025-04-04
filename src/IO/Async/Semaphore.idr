@@ -3,7 +3,7 @@ module IO.Async.Semaphore
 import Data.Linear.Ref1
 import Data.Nat
 import IO.Async.Loop
-import IO.Async.Type
+import IO.Async.Core
 
 %default total
 
