@@ -125,7 +125,8 @@ sleep s c t =
         as => run s as t
 
 spawnImpl s pkg t =
-  let False # t := read1 s.running t | _ # t => () # t
+  let _     # t := mod1 s.queue (:< pkg) t
+      False # t := read1 s.running t | _ # t => () # t
       _     # t := write1 s.running True t
    in run s [] t
 
