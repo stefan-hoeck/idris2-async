@@ -2,93 +2,93 @@ NUC:
 
 1 thread
 
-  Alloc:          32 s 939 ms 518 us 718 ns
-  Async2:         0 us 335 ns
-  Bind:           0 us 11 ns
-  Chained Spawn:  0 us 114 ns
-  Consumers:      7 us 767 ns
-  Par Traverse:   2 us 880 ns
-  Ping Pong:      1 us 32 ns
-  Race (trivial): 0 us 528 ns
-  Race (single):  0 us 729 ns
-  Race (both):    1 us 16 ns
-  Scheduling:     29 s 318 ms 317 us 197 ns
-  Spawn:          0 us 179 ns
+  Alloc:          26 s 789 ms 879 us 510 ns
+  Async2:         0 us 329 ns
+  Bind:           0 us 10 ns
+  Chained Spawn:  0 us 118 ns
+  Consumers:      7 us 476 ns
+  Par Traverse:   2 us 745 ns
+  Ping Pong:      0 us 971 ns
+  Race (trivial): 0 us 498 ns
+  Race (single):  0 us 696 ns
+  Race (both):    0 us 943 ns
+  Scheduling:     26 s 173 ms 981 us 485 ns
+  Spawn:          0 us 170 ns
 
 2 threads
 
-  Alloc:          18 s 774 ms 412 us 125 ns
-  Async2:         0 us 339 ns
+  Alloc:          14 s 436 ms 683 us 160 ns
+  Async2:         0 us 347 ns
   Bind:           0 us 11 ns
-  Chained Spawn:  0 us 118 ns
-  Consumers:      8 us 607 ns
-  Par Traverse:   4 us 630 ns
-  Ping Pong:      4 us 943 ns
-  Race (trivial): 0 us 527 ns
-  Race (single):  0 us 724 ns
-  Race (both):    0 us 978 ns
-  Scheduling:     26 s 52 ms 319 us 988 ns
-  Spawn:          2 us 806 ns
+  Chained Spawn:  0 us 125 ns
+  Consumers:      7 us 19 ns
+  Par Traverse:   2 us 857 ns
+  Ping Pong:      1 us 34 ns
+  Race (trivial): 0 us 525 ns
+  Race (single):  0 us 729 ns
+  Race (both):    0 us 988 ns
+  Scheduling:     19 s 396 ms 108 us 790 ns
+  Spawn:          0 us 176 ns
 
 4 threads
 
-  Alloc:          16 s 849 ms 890 us 489 ns
-  Async2:         0 us 338 ns
+  Alloc:          12 s 849 ms 185 us 329 ns
+  Async2:         0 us 354 ns
   Bind:           0 us 11 ns
-  Chained Spawn:  0 us 117 ns
-  Consumers:      9 us 929 ns
-  Par Traverse:   5 us 265 ns
-  Ping Pong:      10 us 929 ns
-  Race (trivial): 0 us 531 ns
-  Race (single):  0 us 709 ns
-  Race (both):    0 us 967 ns
-  Scheduling:     20 s 677 ms 111 us 600 ns
-  Spawn:          1 us 68 ns
+  Chained Spawn:  0 us 128 ns
+  Consumers:      11 us 251 ns
+  Par Traverse:   2 us 914 ns
+  Ping Pong:      1 us 193 ns
+  Race (trivial): 0 us 542 ns
+  Race (single):  0 us 744 ns
+  Race (both):    1 us 20 ns
+  Scheduling:     15 s 249 ms 350 us 970 ns
+  Spawn:          0 us 187 ns
 
 8 threads
 
-  Alloc:          17 s 869 ms 87 us 383 ns
-  Async2:         0 us 344 ns
-  Bind:           0 us 11 ns
-  Chained Spawn:  0 us 121 ns
-  Consumers:      10 us 707 ns
-  Par Traverse:   6 us 80 ns
-  Ping Pong:      11 us 384 ns
-  Race (trivial): 0 us 545 ns
-  Race (single):  0 us 728 ns
-  Race (both):    0 us 980 ns
-  Scheduling:     20 s 955 ms 792 us 48 ns
-  Spawn:          1 us 662 ns
+  Alloc:          13 s 654 ms 468 us 653 ns
+  Async2:         0 us 362 ns
+  Bind:           0 us 12 ns
+  Chained Spawn:  0 us 132 ns
+  Consumers:      12 us 132 ns
+  Par Traverse:   3 us 151 ns
+  Ping Pong:      1 us 346 ns
+  Race (trivial): 0 us 587 ns
+  Race (single):  0 us 768 ns
+  Race (both):    1 us 38 ns
+  Scheduling:     14 s 955 ms 737 us 106 ns
+  Spawn:          0 us 217 ns
 
 16 threads
 
-  Alloc:          19 s 863 ms 470 us 32 ns
-  Async2:         0 us 358 ns
-  Bind:           0 us 11 ns
-  Chained Spawn:  0 us 120 ns
-  Consumers:      13 us 170 ns
-  Par Traverse:   6 us 203 ns
-  Ping Pong:      13 us 597 ns
-  Race (trivial): 0 us 551 ns
-  Race (single):  0 us 738 ns
-  Race (both):    0 us 995 ns
-  Scheduling:     20 s 784 ms 673 us 262 ns
-  Spawn:          1 us 690 ns
+  Alloc:          15 s 191 ms 464 us 3 ns
+  Async2:         0 us 373 ns
+  Bind:           0 us 12 ns
+  Chained Spawn:  0 us 134 ns
+  Consumers:      13 us 946 ns
+  Par Traverse:   3 us 628 ns
+  Ping Pong:      1 us 493 ns
+  Race (trivial): 0 us 602 ns
+  Race (single):  0 us 782 ns
+  Race (both):    1 us 70 ns
+  Scheduling:     14 s 558 ms 707 us 182 ns
+  Spawn:          0 us 275 ns
 
 32 threads
 
-  Alloc:          21 s 359 ms 326 us 373 ns
-  Async2:         0 us 373 ns
-  Bind:           0 us 12 ns
-  Chained Spawn:  0 us 131 ns
-  Consumers:      15 us 592 ns
-  Par Traverse:   6 us 424 ns
-  Ping Pong:      14 us 458 ns
-  Race (trivial): 0 us 588 ns
-  Race (single):  0 us 801 ns
-  Race (both):    1 us 77 ns
-  Scheduling:     21 s 859 ms 558 us 920 ns
-  Spawn:          1 us 852 ns
+  Alloc:          16 s 535 ms 469 us 134 ns
+  Async2:         0 us 411 ns
+  Bind:           0 us 16 ns
+  Chained Spawn:  0 us 151 ns
+  Consumers:      15 us 219 ns
+  Par Traverse:   4 us 45 ns
+  Ping Pong:      1 us 639 ns
+  Race (trivial): 0 us 738 ns
+  Race (single):  0 us 850 ns
+  Race (both):    1 us 151 ns
+  Scheduling:     14 s 396 ms 391 us 92 ns
+  Spawn:          0 us 305 ns
 
 Lenovo:
 
