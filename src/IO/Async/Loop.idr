@@ -112,6 +112,19 @@ runAsync env as = runAsyncWith env as (\_ => pure ())
 -- Async Runner (Here be Dragons)
 --------------------------------------------------------------------------------
 
+record CBState (es : List Type) (a : Type) where
+  constructor CST
+  {0 resErrs : List Type}
+  {0 envType, resType : Type}
+
+  env      : envType
+  cnclCB   : IO1 ()
+  cnclCncl : IO1 ()
+  fiber    : FiberImpl resErrs resType
+  mask     : Nat -- cancellation mask
+  stack    : Stack envType es resErrs a resType
+  {auto el : EventLoop envType}
+
 prepend : Async e es a -> Stack e es fs a b -> Stack e [] fs () b
 prepend act s = Bnd (const act) :: s
 
@@ -129,6 +142,7 @@ synchronous : Outcome es a -> Fiber es a
 synchronous o = MkFiber unit1 (\_,cb,t => let _ # t := cb o t in unit1 # t)
 
 -- a fiber from an asynchronous computation.
+%noinline
 asynchronous : ((Result es a -> IO1 ()) -> IO1 (IO1 ())) -> IO1 (Fiber es a)
 asynchronous install t =
   let def     # t := deferredOf1 (Outcome es a) t
@@ -136,9 +150,24 @@ asynchronous install t =
       cncl        := T1.do cleanup; putDeferred1 def Canceled
    in MkFiber cncl (observeDeferredAs1 def) # t
 
-%inline
-spawnFib : EventLoop e => e -> Nat -> FiberImpl es a -> Async e es a -> IO1 ()
-spawnFib ev mask fbr act = spawn ev (FST fbr mask act [])
+%noinline
+spawnCB : CBState es a -> Outcome es a -> IO1 ()
+spawnCB (CST env c1 c2 fbr cm st) o t =
+  case o of
+    Succeeded r => let _ # t := c2 t in spawn env (FST fbr cm (Val r) st) t
+    Error     x => let _ # t := c2 t in spawn env (FST fbr cm (Err x) st) t
+    Canceled    => let _ # t := c1 t in spawn env (FST fbr 1  (Val ()) (hooks st)) t
+
+%noinline
+writeOnCB :
+     Once World (Outcome es a)
+  -> ((Result es a -> IO1 ()) -> IO1 (IO1 ()))
+  -> IO1 (IO1 ())
+writeOnCB o f t = f (putOnce1 o . toOutcome) t
+
+%noinline
+obsOnce : Once World (Outcome es a) -> CBState es a -> IO1 (RunRes e)
+obsOnce o st t = let _ # t := observeOnce1 o (spawnCB st) t in Done # t
 
 -- Finalize the fiber with the given outcome and call all its observers.
 %inline
@@ -264,16 +293,10 @@ runR env act cm cc fbr st t =
 
     Asnc f =>
       let o  # t := onceOf1 (Outcome es a) t
-          c1 # t := f (putOnce1 o . toOutcome) t
+          c1 # t := writeOnCB o f t
           c2 # t := observeCancel o cm fbr t
        in case peekOnce1 o t of
-            Nothing  # t =>
-              let _ # t := observeOnce1 o (\out,t => case out of
-                             Succeeded r => let _ # t := c2 t in spawn env (FST fbr cm (Val r) st) t
-                             Error     x => let _ # t := c2 t in spawn env (FST fbr cm (Err x) st) t
-                             Canceled    => let _ # t := c1 t in spawn env (FST fbr 1  (Val ()) (hooks st)) t
-                           ) t
-               in Done # t
+            Nothing  # t => obsOnce o (CST env c1 c2 fbr cm st) t
             Just out # t => case out of
               Succeeded r => let _ # t := c2 t in run env (Val r) cm cc fbr st t
               Error     x => let _ # t := c2 t in run env (Err x) cm cc fbr st t
