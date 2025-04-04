@@ -28,7 +28,7 @@ parameters {auto has : Has Errno es}
       Right peer    => pure peer
       Left (Here x) =>
         if x == EINPROGRESS || x == EAGAIN
-           then ignore (poll sock POLLOUT) >> acceptnb sock
+           then ignore (poll sock POLLIN) >> acceptnb sock
            else throw x
 
   ||| Connects a socket to the given address.
