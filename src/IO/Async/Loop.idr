@@ -42,7 +42,8 @@ toFiber fbr = MkFiber (putOnce1 fbr.cncl ()) (observeDeferredAs1 fbr.res)
 --------------------------------------------------------------------------------
 
 data StackItem : (e : Type) -> (es,fs : List Type) -> (a,b : Type) -> Type where 
-  Bnd   : (Result es a -> Async e fs b) -> StackItem e es fs a b
+  Bnd   : (a -> Async e es b) -> StackItem e es es a b
+  Att   : StackItem e es fs a (Result es a)
   Inc   : StackItem e es es a a
   Abort : StackItem e [] es () a
   Dec   : StackItem e es es a a
@@ -125,7 +126,7 @@ record CBState (es : List Type) (a : Type) where
   stack    : Stack envType es resErrs a resType
   {auto el : EventLoop envType}
 
-prepend : Async e es a -> Stack e es fs a b -> Stack e [] fs () b
+prepend : Async e [] a -> Stack e [] fs a b -> Stack e [] fs () b
 prepend act s = Bnd (const act) :: s
 
 hooks : Stack e es fs a b -> Stack e [] fs () b
@@ -216,17 +217,16 @@ runC env act cc fbr st t =
   case act of
     UC f   => run env (f fbr.token 1) 1 cc fbr (Dec::st) t
     Val x => case st of
-      Bnd f :: tl  => case f (Right x) of
+      Bnd f :: tl => case f x of
         UC g => run env (g fbr.token 1) 1 cc fbr (Dec::tl) t
         a    => run env (pure ()) 1 cc fbr (hooks st) t
-      Inc :: tl    => run env (Val x) 1 cc fbr tl t
+      Att :: tl   => runC env (Val $ Right x) cc fbr tl t
+      Inc :: tl   => run env (Val x) 1 cc fbr tl t
       _           => run env (pure ()) 1 cc fbr (hooks st) t
     Err x => case st of
-      Bnd f :: tl  => case f (Left x) of
-        UC g => run env (g fbr.token 1) 1 cc fbr (Dec::tl) t
-        a    => run env (pure ()) 1 cc fbr (hooks st) t
-      Inc :: tl    => run env (Err x) 1 cc fbr tl t
-      _           => run env (pure ()) 1 cc fbr (hooks st) t
+      Att :: tl => runC env (Val $ Left x) cc fbr tl t
+      Inc :: tl => run env (Err x) 1 cc fbr tl t
+      _         => run env (pure ()) 1 cc fbr (hooks st) t
     _    => run env (pure ()) 1 cc fbr (hooks st) t
 
 runR env act cm cc fbr st t =
@@ -234,22 +234,24 @@ runR env act cm cc fbr st t =
     Bind x f => case x of
       Val x => run env (f x) cm cc fbr st t
       Self  => run env (f fbr.token) cm cc fbr st t
-      _     => run env x cm cc fbr (Bnd (either Err f) :: st) t
+      _     => run env x cm cc fbr (Bnd f :: st) t
 
     Val x      => case st of
-      Bnd f  :: tl => run env (f $ Right x) cm        cc fbr tl t
+      Bnd f  :: tl => run env (f x) cm        cc fbr tl t
       Inc    :: tl => run env act   (S cm)    cc fbr tl t
       Dec    :: tl => run env act   (pred cm) cc fbr tl t
       -- ignore cancel hook because cancelation is currently not
       -- observable.
       Hook h :: tl => run env act   cm        cc fbr tl t
       Abort  :: tl => finalize fbr Canceled t
+      Att    :: tl => run env (Val $ Right x) cm cc fbr tl t
       []          => finalize fbr (Succeeded x) t
 
     Err x      => case st of
-      Bnd f  :: tl => run env (f $ Left x) cm        cc fbr tl t
-      Inc    :: tl => run env act   (S cm)    cc fbr tl t
-      Dec    :: tl => run env act   (pred cm) cc fbr tl t
+      Att    :: tl => run env (Val $ Left x) cm cc fbr tl t
+      Bnd _  :: tl => run env (Err x)        cm cc fbr tl t
+      Inc    :: tl => run env act   (S cm)      cc fbr tl t
+      Dec    :: tl => run env act   (pred cm)   cc fbr tl t
       -- ignore cancel hook because cancelation is currently not
       -- observable.
       Hook h :: tl => run env act   cm        cc fbr tl t
@@ -275,7 +277,7 @@ runR env act cm cc fbr st t =
       let r # t := ioToF1 x t
        in run env (terminal r) cm cc fbr st t
 
-    Attempt x => run env x cm cc fbr (Bnd Val :: st) t
+    Attempt x => run env x cm cc fbr (Att :: st) t
 
     Cancel      => 
       let _ # t := putOnce1 fbr.cncl () t
