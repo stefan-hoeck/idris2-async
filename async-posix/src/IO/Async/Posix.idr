@@ -60,6 +60,25 @@ parameters {auto has : Has Errno es}
            else throw x
       Right res => pure res
 
+  ||| Like `readnb` but reads data into a pre-allocated C-pointer and
+  ||| converts it from there.
+  |||
+  ||| This is useful for re-using a (reasonably large) buffer when
+  ||| streaming lots of comparably small chunks of data. Instead of
+  ||| allocating a new - potentially much too large - buffer with every
+  ||| read (as is the case with `readnb`), we allocate a buffer once
+  ||| and copy only the bytes we actually read into an immutable
+  ||| data type such as a string or byte vector.
+  export
+  readPtrNB : (0 r : Type) -> FromPtr r => CPtr -> Async e es r
+  readPtrNB r p =
+    attempt (readPtr {es = [Errno]} fd r p) >>= \case
+      Left (Here x) =>
+        if x == EAGAIN || x == EWOULDBLOCK
+           then onEvent POLLIN (readPtr fd r p)
+           else throw x
+      Right res => pure res
+
 
   ||| Writes to a file descriptor without blocking.
   |||
