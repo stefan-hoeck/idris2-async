@@ -419,6 +419,21 @@ export %inline
 (.ms) : Nat -> Clock Duration
 n.ms = (n * 1000).us
 
+||| Converts a number of minutes to nanoseconds
+export %inline
+(.min) : Nat -> Clock Duration
+n.min = (n * 60).s
+
+||| Converts a number of hours to nanoseconds
+export %inline
+(.h) : Nat -> Clock Duration
+n.h = (n * 60).min
+
+||| Converts a number of days to nanoseconds
+export %inline
+(.d) : Nat -> Clock Duration
+n.d = (n * 24).h
+
 ||| Runs an IO action, returning the time delta it took to run.
 export %inline
 delta : HasIO io => io () -> io (Clock Duration)

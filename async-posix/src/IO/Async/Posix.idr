@@ -175,3 +175,37 @@ sleepTill : TimerH e => (Tm -> Clock UTC) -> Async e es ()
 sleepTill fun = do
   now <- liftIO (clockTime UTC)
   sleep (timeDifference (fun $ fromUTC now) now)
+
+||| Computes local time of the next full minute.
+export
+nextMinute : Tm -> Clock UTC
+nextMinute x = addDuration (toUTC ({sec := 0} x)) 60.s
+
+||| Computes local time of the next full hour.
+export
+nextHour : Tm -> Clock UTC
+nextHour tm = addDuration (toUTC ({sec := 0, min := 0} tm)) 1.h
+
+||| Computes local time of 00:00:00 of the next day.
+export
+nextDay : Tm -> Clock UTC
+nextDay tm = addDuration (toUTC ({sec := 0, min := 0, hour := 0} tm)) 1.d
+
+||| Computes local time of 00:00:00 on January 1 of the next day.
+export
+nextYear : Tm -> Clock UTC
+nextYear tm = toUTC $ {year := tm.year + 1} blank
+
+||| Computes local time of 00:00:00 of the first day of the next month.
+export
+nextMonth : Tm -> Clock UTC
+nextMonth tm =
+  if tm.mon == 11
+     then nextYear tm
+     else toUTC $ {mon := tm.mon + 1, year := tm.year} blank
+
+||| Computes local time of 00:00:00 of the next Sunday
+export
+nextWeek : Tm -> Clock UTC
+nextWeek tm =
+  addDuration (toUTC ({sec := 0, min := 0, hour := 0} tm)) (cast $ 7 - tm.wday).d
