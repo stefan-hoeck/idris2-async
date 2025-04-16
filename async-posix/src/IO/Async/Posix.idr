@@ -2,8 +2,10 @@ module IO.Async.Posix
 
 import public IO.Async
 import public IO.Async.Loop.PollH
+import public IO.Async.Loop.TimerH
 import public System.Posix.File
 import public System.Posix.Poll.Types
+import public System.Posix.Time
 
 import Data.C.Ptr
 import System.Posix.Dir
@@ -165,3 +167,11 @@ parameters {auto has : Has Errno es}
         v <- runIO (fromPtr cp2)
         act v
         streamp r cp act
+
+||| Wait until the given UTC time, which is computed from the
+||| current time.
+export
+sleepTill : TimerH e => (Tm -> Clock UTC) -> Async e es ()
+sleepTill fun = do
+  now <- liftIO (clockTime UTC)
+  sleep (timeDifference (fun $ fromUTC now) now)
