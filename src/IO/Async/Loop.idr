@@ -12,7 +12,7 @@ import Syntax.T1
 %default total
 
 --------------------------------------------------------------------------------
--- Fiber Implementation (Here be Dragons)
+-- Fiber Implementation
 --------------------------------------------------------------------------------
 
 record FiberImpl (es : List Type) (a : Type) where
@@ -26,7 +26,7 @@ record FiberImpl (es : List Type) (a : Type) where
   ||| Set, if the fiber has run to completion.
   res    : Deferred World (Outcome es a)
 
--- allocates a new fiber, setting its initial state to `Running`
+-- allocates a new fiber
 newFiber : IO1 (FiberImpl es a)
 newFiber t =
   let tok  # t := Unique.token1 t
@@ -41,34 +41,64 @@ toFiber fbr = MkFiber (putOnce1 fbr.cncl ()) (observeDeferredAs1 fbr.res)
 -- Running Fiber State
 --------------------------------------------------------------------------------
 
+-- An item on the call stack of a running fiber. See `Stack`.
 data StackItem : (e : Type) -> (es,fs : List Type) -> (a,b : Type) -> Type where 
+  -- A monadic continuation. This is put on the call stack whenever we
+  -- encounter the `Bind` data constructor.
   Bnd   : (a -> Async e es b) -> StackItem e es es a b
+
+  -- Error handling. This is put on the call stack whenever we encounter
+  -- the `Attempt` data constructor.
   Att   : StackItem e es fs a (Result es a)
+
+  -- Instruction to increase the cancelation mask by one.
   Inc   : StackItem e es es a a
+
+  -- Utility to inform us that the computation is finished here.
   Abort : StackItem e [] es () a
+
+  -- Instruction to decrease the cancelation mask by one.
   Dec   : StackItem e es es a a
+
+  -- A cancelation hook. This will be ignored if the fiber is
+  -- currently not canceled or cancelation cannot be observed.
   Hook  : Async e [] () -> StackItem e es es a a
 
 -- Properly typed stack of nested `Bind`s plus instructions
--- related to cancelation and masking
+-- related to cancelation and masking of a running fiber.
+--
+-- While building and consuming our own call stack comes with a certain
+-- overhead, this overhead is typically small compared to the cost
+-- associated with spawning fibers, performing system calls, or
+-- handling asynchronous boundaries.
 data Stack : (e : Type) -> (es,fs : List Type) -> (a,b : Type) -> Type where
   Nil  : Stack e es es a a
   (::) : StackItem e es fs a b -> Stack e fs gs b c -> Stack e es gs a c
 
+||| Internal state of a running fiber.
 export
 record FbrState (e : Type) where
   constructor FST
   {0 curErrs, resErrs : List Type}
   {0 curType, resType : Type}
 
-  fiber : FiberImpl resErrs resType
+  fiber : FiberImpl resErrs resType -- (mutable) state of the running fiber
   mask  : Nat -- cancellation mask
   comp  : Async e curErrs curType -- current computation
   stack : Stack e curErrs resErrs curType resType -- computation stack
 
+||| Result of (partially) evaluate a fiber.
 public export
 data RunRes : Type -> Type where
+  ||| The fiber has terminated with an `Outcome`, or we arrived at
+  ||| an asynchronous boundary (`Asnc` data constructor) and the
+  ||| fiber should be parked until a result is ready.
   Done : RunRes e
+
+  ||| Evaluation of the fiber is not yet finished, but should be
+  ||| rescheduled by moving the fiber at the end of the event loop's
+  ||| work queue. This happens a) after a certain number of evaluation
+  ||| steps, or b) when `cede` is encountered.
   Cont : FbrState e -> RunRes e
 
 ||| A context for submitting and running work packages asynchronously.
@@ -87,7 +117,10 @@ data RunRes : Type -> Type where
 public export
 interface EventLoop (0 e : Type) where
   constructor EL
-  spawn : e -> FbrState e -> IO1 ()
+  ||| Submits a fiber to be run by event loop `el`
+  spawn : (el : e) -> FbrState e -> IO1 ()
+
+  ||| Number of evaluation steps before a fiber should be rescheduled.
   limit : Nat
 
 export
@@ -179,14 +212,16 @@ finalize fbr o t = let _ # t := putDeferred1 fbr.res o t in Done # t
 -- been canceled and cancelation is currently observable
 run :
      {auto el : EventLoop e}
-  -> (env : e)
-  -> Async e es a
-  -> (cancelMask  : Nat)
-  -> (cedeCount   : Nat)
-  -> FiberImpl fs b
-  -> Stack e es fs a b
+  -> (env : e)           -- the event loop on which the fiber runs
+  -> Async e es a        -- next computation step of the running fiber
+  -> (cancelMask  : Nat) -- 0 if cancelation can be observed > 0 otherwise
+  -> (cedeCount   : Nat) -- if at 0, the fiber will be rescheduled
+  -> FiberImpl fs b      -- mutable state of the running fiber
+  -> Stack e es fs a b   -- call stack of the running fiber
   -> IO1 (RunRes e)
 
+-- evaluates an alive fiber: one that has not been canceled or
+-- for which cancelation can currently not be observed
 runR :
      {auto el : EventLoop e}
   -> (env : e)
@@ -197,6 +232,9 @@ runR :
   -> Stack e es fs a b
   -> IO1 (RunRes e)
 
+-- runs a canceled fiber
+-- we no longer need a `cancelMask` argument, because all we
+-- are going to do now is extract and run the cancellation hooks
 runC :
      {auto el : EventLoop e}
   -> (env : e)
@@ -206,11 +244,20 @@ runC :
   -> Stack e es fs a b
   -> IO1 (RunRes e)
 
+-- the cede count arrived at 0 so we stop and allow the fiber
+-- to be rescheduled on the event loop
 run env act cm 0     fbr st t = Cont (FST fbr cm act st) # t
+
+-- the cancel mask is at 0 so cancelation can currently be observed
+-- we check if the fiber has been canceled and either invoke
+-- `runC` or `runR`
 run env act 0  (S k) fbr st t =
   case completedOnce1 fbr.cncl t of
     False # t => runR env act 0 k fbr st t
     True  # t => runC env act k fbr st t
+
+-- cancellation can currently not be observed so there is no
+-- point in checking if the fiber has been canceled.
 run env act c  (S k) fbr st t = runR env act c k fbr st t
 
 runC env act cc fbr st t =
