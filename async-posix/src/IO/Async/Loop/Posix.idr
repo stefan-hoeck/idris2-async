@@ -350,12 +350,21 @@ asyncThreads = do
 |||
 ||| We use environment variable `IDRIS2_ASYNC_THREADS` to determine the
 ||| number of threads to use (default: 2) and cancel the running program
-||| on receiving `SIGINT`. Other signals are not supported.
+||| on receiving `SIGINT`.
+|||
+||| By default, only `SIGINT` is masked, to handle other signals
+||| within your program, give `{sigs = [...]}` as the first
+||| argument. One of the signals must be SIGINT, which is enforced by
+||| the `Has SIGINT sigs` constraint.
 export covering
-simpleApp : Async Poll [] () -> IO ()
-simpleApp prog = do
+simpleApp
+  : {default [SIGINT] sigs : List Signal}
+  -> Has SIGINT sigs
+  => Async Poll [] ()
+  -> IO ()
+simpleApp {sigs} prog = do
   n <- asyncThreads
-  app n [SIGINT] posixPoller cprog
+  app n sigs posixPoller cprog
 
   where
     cprog : Async Poll [] ()
