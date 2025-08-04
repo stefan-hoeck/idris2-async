@@ -62,6 +62,22 @@ parameters {auto has : Has Errno es}
            else throw x
       Right res => pure res
 
+  ||| Like `readnb` but reads data into a pre-allocated buffer.
+  |||
+  ||| If the descriptor corresponds to a regular file, this will just
+  ||| read up to the given amount of bytes from the file. If the descriptor
+  ||| corresponds to a socket or FIFO (pipe), the `O_NONBLOCK` flag of
+  ||| the descriptor *must* have been set (via `addFlags` for instance).
+  export
+  readRawNb : Buf -> Async e es EMBuffer
+  readRawNb buf =
+    attempt (readRaw {es = [Errno]} fd buf) >>= \case
+      Left (Here x) =>
+        if x == EAGAIN || x == EWOULDBLOCK
+           then onEvent POLLIN (readRaw fd buf)
+           else throw x
+      Right res => pure res
+
   ||| Like `readnb` but reads data into a pre-allocated C-pointer and
   ||| converts it from there.
   |||
