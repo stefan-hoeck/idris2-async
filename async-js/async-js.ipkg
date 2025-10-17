@@ -5,6 +5,7 @@ brief   = "An asynchronous run loop for the JS backends"
 
 depends = base >= 0.7.0
         , async
+        , js
 
 modules = IO.Async.JS
 
