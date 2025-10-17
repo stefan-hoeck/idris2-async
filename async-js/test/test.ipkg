@@ -1,0 +1,14 @@
+package async-js-test
+version = 0.1.0
+authors = "stefan-hoeck"
+brief   = "Asynchronous and concurrent computations in Idris2"
+
+opts    = "--codegen node"
+
+depends = base >= 0.7.0
+        , async-js
+
+sourcedir = "src"
+
+executable = "async-js-test"
+main       = Main

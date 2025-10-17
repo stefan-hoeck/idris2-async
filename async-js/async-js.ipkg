@@ -1,0 +1,11 @@
+package async-js
+version = 0.1.0
+authors = "stefan-hoeck"
+brief   = "An asynchronous run loop for the JS backends"
+
+depends = base >= 0.7.0
+        , async
+
+modules = IO.Async.JS
+
+sourcedir = "src"
