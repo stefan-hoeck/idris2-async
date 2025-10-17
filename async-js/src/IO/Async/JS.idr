@@ -69,8 +69,7 @@ run s (x :: xs) t =
     Cont fst # t => let _ # t := mod1 s.queue (:< fst) t in run s xs t
     Done     # t => run s xs t
 
--- Check if there is more work in the queue. if yes, run it, otherwise abort.
--- Note: Only call this when there are no timers left!
+-- Check if there is more work in the queue. If yes, run it, otherwise abort.
 checkQueue s t =
   let sa # t := read1 s.queue t
       _  # t := write1 s.queue [<] t
