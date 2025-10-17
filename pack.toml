@@ -4,6 +4,12 @@ path = "."
 ipkg = "async.ipkg"
 test = "test/test.ipkg"
 
+[custom.all.async-js]
+type = "local"
+path = "async-js"
+ipkg = "async-js.ipkg"
+test = "test/test.ipkg"
+
 [custom.all.async-posix]
 type = "local"
 path = "async-posix"

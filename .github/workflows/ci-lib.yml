@@ -37,3 +37,9 @@ jobs:
         run: pack --no-prompt typecheck async-epoll
       - name: Run tests
         run: pack --no-prompt test async
+      - name: Build async-js
+        run: pack --no-prompt typecheck async-js
+      - name: Run tests
+        run: |
+          apt-get update && apt-get install --yes nodejs
+          pack --no-prompt test async-js
