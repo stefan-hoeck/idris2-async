@@ -1,6 +1,8 @@
 module IO.Async.JS
 
 import Data.Linear.Ref1
+import public JS.Util
+import public JS.Promise
 import public IO.Async
 import public IO.Async.Loop
 import public IO.Async.Loop.TimerH
@@ -36,7 +38,6 @@ app prog = do
   q <- newref [<]
   runAsyncWith (J r q) prog (\_ => putStrLn "Done. Shutting down")
 
-
 --------------------------------------------------------------------------------
 -- Timers
 --------------------------------------------------------------------------------
@@ -53,6 +54,21 @@ TimerH JS where
    let ms    := toNano cl `div` 1_000_000
        x # t := ffi (prim__setTimeout ms (primRun act)) t
     in ffi (prim__clearTimeout x) # t
+
+--------------------------------------------------------------------------------
+-- Promises
+--------------------------------------------------------------------------------
+
+||| Converts a JavaScript `Promise` to an `Async` by registering
+||| proper `resolve` and `reject` handlers.
+export
+promise : Has JSErr es => Promise a -> Async JS es a
+promise p =
+  primAsync_ $ \f => ioToF1 $ ignore $
+    onPromise
+      p
+      (runIO . f . Right)
+      (runIO . f . Left . inject . Caught)
 
 --------------------------------------------------------------------------------
 -- Run Loop

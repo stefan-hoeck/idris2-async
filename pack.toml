@@ -30,6 +30,12 @@ type = "local"
 path = "examples"
 ipkg = "async-examples.ipkg"
 
+[custom.all.js]
+type   = "git"
+url    = "https://github.com/stefan-hoeck/idris2-dom"
+commit = "latest:main"
+ipkg   = "js/js.ipkg"
+
 [custom.all.elin]
 type   = "git"
 url    = "https://github.com/stefan-hoeck/idris2-elin"
