@@ -1,6 +1,5 @@
 module IO.Async.JS
 
-import Data.Queue
 import Data.Linear.Ref1
 import public JS.Util
 import public JS.Promise
