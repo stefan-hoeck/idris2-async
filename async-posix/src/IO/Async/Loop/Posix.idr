@@ -325,7 +325,7 @@ app n sigs mkPoll prog = do
   toIO $ sigprocmask SIG_BLOCK sigs
   runIO (dieOnErr $ addFlags Stdin O_NONBLOCK)
   tp <- mkThreadPool n mkPoll
-  runAsyncWith (head tp.workers) prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
+  runAsyncWith (head tp.workers) prog (\_ => stop tp)
   runIO (loop (head tp.workers) POLL_ITER)
   traverse_ (\x => threadWait x) tp.ids
   traverse_ (\w => runIO (release w)) tp.workers
