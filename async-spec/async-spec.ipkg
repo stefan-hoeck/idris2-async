@@ -1,0 +1,18 @@
+package async-spec
+version = 0.1.0
+authors = "stefan-hoeck"
+brief   = "A testing framework for Async programs and IO in general"
+
+depends = base >= 0.7.0
+        , async
+        , pretty-show
+        , prettier-ansi
+
+modules = Test.Async.Spec
+        , Test.Async.Spec.Asserts
+        , Test.Async.Spec.Report
+        , Test.Async.Spec.Runner
+        , Test.Async.Spec.TestEnv
+        , Test.Async.Spec.TestResult
+
+sourcedir = "src"

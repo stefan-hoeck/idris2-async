@@ -1,11 +1,12 @@
 module Test.Async.Spec.Runner
 
-import Data.IORef
+import Data.Linear.Ref1
 import Data.String
+import IO.Async
+import System
 import Test.Async.Spec.Report
 import Test.Async.Spec.TestEnv
 import Test.Async.Spec.TestResult
-import System
 
 %default total
 
@@ -18,23 +19,22 @@ toBool (Just s) =
     "true" => True
     _      => False
 
-covering
-run : TestEnv => TestTree -> IO ()
+run : TestEnv => TestTree e -> Async e [] ()
 run (Leaf desc x)  = x >>= report desc
 run (Node name xs) = do
   printName name 
   incDepth
-  traverse_ run xs
+  assert_total $ traverse_ run xs
   decDepth
 
-export covering
-test : TestTree -> IO ()
+export
+test : TestTree e -> Async e [] ()
 test tree = do
   b  <- toBool <$> getEnv "SPEC_COLOR"
   te <- mkEnv b
   run @{te} tree
-  ts <- readIORef te.tests
-  fs <- readIORef te.failures
+  ts <- readref te.tests
+  fs <- readref te.failures
   summary ts fs
   if fs > 0
      then exitFailure

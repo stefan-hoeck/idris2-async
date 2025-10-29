@@ -1,6 +1,10 @@
 module Main
 
 import IO.Async.JS
+import Test.Async.Cancel
+import Test.Async.Core
+import Test.Async.Race
+import Test.Async.Spec
 
 %default total
 
@@ -18,6 +22,12 @@ delayedErr n msg = primIO (prim__delayedErr n msg)
 
 prog : Async JS [JSErr] ()
 prog = do
+  weakenErrors $ test $ 
+    Node "Async Spec"
+      [ Core.specs
+      , Cancel.specs
+      , Race.specs
+      ]
   -- sequencing of timeouts
   sleep 200.ms
   putStrLn "slept for 200 ms"

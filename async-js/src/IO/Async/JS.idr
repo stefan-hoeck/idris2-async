@@ -94,5 +94,7 @@ checkQueue s t =
         as => run s as t
 
 spawnImpl s x t =
- let True # t := read1 s.running t | False # t => run s [x] t
-  in mod1 s.queue (:<x) t
+ let _     # t := mod1 s.queue (:<x) t
+     False # t := read1 s.running t | True # t => () # t
+     _     # t := write1 s.running True t
+  in run s [] t

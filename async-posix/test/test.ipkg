@@ -1,0 +1,12 @@
+package async-posix-test
+version = 0.1.0
+authors = "stefan-hoeck"
+
+depends = async-test
+        , async-posix
+
+sourcedir = "src"
+
+executable = "async-posix-test"
+
+main = Main

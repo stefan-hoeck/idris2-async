@@ -15,14 +15,14 @@ import IO.Async.Loop.Poller
 import IO.Async.Loop.Queue
 import IO.Async.Loop.SignalST
 import IO.Async.Loop.TimerST
-import IO.Async.Loop.Posix
 import IO.Async.Signal
 
 import public IO.Async
 import public IO.Async.Loop
 import public IO.Async.Loop.PollH
-import public IO.Async.Loop.TimerH
+import public IO.Async.Loop.Posix
 import public IO.Async.Loop.SignalH
+import public IO.Async.Loop.TimerH
 
 import System
 import System.Clock

@@ -1,6 +1,6 @@
 module Test.Async.Spec.Report
 
-import Data.IORef
+import Data.Linear.Ref1
 import Data.String
 import Derive.Prelude
 import Test.Async.Spec.TestEnv
@@ -74,14 +74,13 @@ parameters {auto te : TestEnv}
   textLines : String -> List (Doc te.layout)
   textLines = map line . lines
 
-  printDoc : Doc te.layout -> IO ()
+  printDoc : HasIO io => Doc te.layout -> io ()
   printDoc doc = do
-    dpt <- readIORef te.depth
-    putStr $ renderDoc $
-      indent (dpt * 2) doc
+    dpt <- runIO (read1 te.depth)
+    putStr $ renderDoc $ indent (dpt * 2) doc
 
   export
-  fail : (desc : String) -> Maybe Diff -> String -> IO ()
+  fail : HasIO io => (desc : String) -> Maybe Diff -> String -> io ()
   fail desc md msg = Prelude.do
     addFailure
     addTest
@@ -92,25 +91,25 @@ parameters {auto te : TestEnv}
       ]
 
 export
-succeeded : (te : TestEnv) => (desc : String) -> IO ()
+succeeded : HasIO io => (te : TestEnv) => (desc : String) -> io ()
 succeeded desc = do
   addTest
   printDoc $
     icon SuccessIcon '✓' (markup SuccessText (vsep $ textLines desc))
 
 export
-report : (te : TestEnv) => (desc : String) -> TestResult -> IO ()
+report : HasIO io => TestEnv => (desc : String) -> TestResult -> io ()
 report desc (Failure md msg) = fail desc md msg
 report desc Success          = succeeded desc
 
 export
-summary : (te : TestEnv) => (ts,fs : Nat) -> IO ()
+summary : HasIO io => TestEnv => (ts,fs : Nat) -> io ()
 summary ts 0 = printDoc $ markup Summary (line "\{testCount ts} passed")
 summary ts n =
   printDoc $ markup FailedText (line "\{show n} of \{testCount ts} failed")
 
 export
-printName : (te : TestEnv) => String -> IO ()
+printName : HasIO io => (te : TestEnv) => String -> io ()
 printName str = do
-  n <- readIORef te.depth
+  n <- runIO (read1 te.depth)
   printDoc . markup (Title n) . vsep $ textLines str

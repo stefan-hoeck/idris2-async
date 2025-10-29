@@ -1,6 +1,7 @@
 module Test.Async.Spec.TestResult
 
 import Derive.Prelude
+import IO.Async
 import Text.Show.Diff
 
 %language ElabReflection
@@ -27,16 +28,16 @@ data TestResult : Type where
 %runElab derive "TestResult" [Show,Eq]
 
 public export
-0 Test : Type
-Test = IO TestResult
+0 Test : Type -> Type
+Test e = Async e [] TestResult
 
-dummy : Test
+dummy : Test e
 dummy = pure Success
 
 public export
-data TestTree : Type where
-  Node : (name : String) -> List TestTree -> TestTree
-  Leaf : (desc : String) -> Test -> TestTree
+data TestTree : Type -> Type where
+  Node : (name : String) -> List (TestTree e) -> TestTree e
+  Leaf : (desc : String) -> Test e -> TestTree e
 
 public export
 data Pre : Type where
@@ -51,13 +52,13 @@ it : Pre
 it = It
 
 export
-record Post where
+record Post e where
   constructor At
   desc : String
-  test : Test
+  test : Test e
 
 export %inline
-at : String -> Test -> Post
+at : String -> Test e -> Post e
 at = At
 
 export
@@ -70,55 +71,56 @@ Interpolation Verb where
   interpolate Must   = "must"
 
 export %inline
-leaf : Verb -> Post -> TestTree
+leaf : Verb -> Post e -> TestTree e
 leaf v (At d t) = Leaf "\{v} \{d}" t
 
 public export
-record FlatSpecInstr where
+record FlatSpecInstr e where
   constructor FSI
   verb : Verb
   pre  : Pre
-  post : Post
+  post : Post e
 
 export infixr 5 `should`,`at`,`must`,`can`
 
 public export %inline
-should : (pre : Pre) -> (post : Post) -> FlatSpecInstr
+should : (pre : Pre) -> (post : Post e) -> FlatSpecInstr e
 should = FSI Should
 
 public export %inline
-must : (pre : Pre) -> (post : Post) -> FlatSpecInstr
+must : (pre : Pre) -> (post : Post e) -> FlatSpecInstr e
 must = FSI Must
 
 public export %inline
-can : (pre : Pre) -> (post : Post) -> FlatSpecInstr
+can : (pre : Pre) -> (post : Post e) -> FlatSpecInstr e
 can = FSI Can
 
 public export
-data ValidInstrs : (is : List FlatSpecInstr) -> Type where
+data ValidInstrs : (is : List (FlatSpecInstr e)) -> Type where
   IsValidInstrs :
-       {0 v : Verb}
+       {0 e : Type}
+    -> {0 v : Verb}
     -> {0 s : String}
-    -> {0 p : Post}
-    -> {0 t : List FlatSpecInstr}
+    -> {0 p : Post e}
+    -> {0 t : List (FlatSpecInstr e)}
     -> ValidInstrs (FSI v (Desc s) p :: t)
 
 export
 flatSpec :
      (title : String)
-  -> (is    : List FlatSpecInstr)
+  -> (is    : List (FlatSpecInstr e))
   -> {auto 0 prf : ValidInstrs is}
-  -> TestTree
+  -> TestTree e
 flatSpec ttl (FSI v (Desc s) p :: t) @{IsValidInstrs} =
   Node ttl (go [<] s [< leaf v p] t)
 
   where
     go :
-         SnocList TestTree
+         SnocList (TestTree e)
       -> String
-      -> SnocList TestTree
-      -> List FlatSpecInstr
-      -> List TestTree
+      -> SnocList (TestTree e)
+      -> List (FlatSpecInstr e)
+      -> List (TestTree e)
     go sx s sy []                       = sx <>> [Node s $ sy <>> []]
     go sx s sy (FSI v It       p :: xs) = go sx s (sy :< leaf v p) xs
     go sx s sy (FSI v (Desc n) p :: xs) =
@@ -128,7 +130,7 @@ flatSpec ttl (FSI v (Desc s) p :: t) @{IsValidInstrs} =
 -- Examples
 --------------------------------------------------------------------------------
 
-spec1 : List FlatSpecInstr
+spec1 : List (FlatSpecInstr e)
 spec1 =
   [ "an empty list" `should` "have length 0" `at` dummy
   ,   it `should` "return Nothing on pop" `at` dummy

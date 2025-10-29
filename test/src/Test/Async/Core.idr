@@ -30,7 +30,7 @@ square : Nat -> Nat
 square x = x * x
 
 covering
-instrs : String -> Async SyncST [String] Nat -> List FlatSpecInstr
+instrs : TimerH e => String -> Async e [String] Nat -> List (FlatSpecInstr e)
 instrs str act =
   [ Desc str `should` "be returned unchanged" `at` (assert act val)
   ,   it `should` "be returned unchanged after mapping with id" `at`
@@ -49,7 +49,7 @@ instrs str act =
   ]
 
 export covering
-specs : TestTree
+specs : TimerH e => TestTree e
 specs =
   flatSpec "Core Spec" $
     instrs "a natural number lifted with pure" lifted ++

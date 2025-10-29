@@ -2,7 +2,17 @@
 type = "local"
 path = "."
 ipkg = "async.ipkg"
-test = "test/test.ipkg"
+test = "test/async-test.ipkg"
+
+[custom.all.async-spec]
+type = "local"
+path = "async-spec"
+ipkg = "async-spec.ipkg"
+
+[custom.all.async-test]
+type = "local"
+path = "test"
+ipkg = "async-test.ipkg"
 
 [custom.all.async-js]
 type = "local"
@@ -14,11 +24,13 @@ test = "test/test.ipkg"
 type = "local"
 path = "async-posix"
 ipkg = "async-posix.ipkg"
+test = "test/test.ipkg"
 
 [custom.all.async-epoll]
 type = "local"
 path = "async-epoll"
 ipkg = "async-epoll.ipkg"
+test = "test/test.ipkg"
 
 [custom.all.async-docs]
 type = "local"

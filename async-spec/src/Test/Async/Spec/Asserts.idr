@@ -1,9 +1,8 @@
 module Test.Async.Spec.Asserts
 
-import Data.IORef
+import Data.Linear.Ref1
 import Data.String
 import IO.Async
-import IO.Async.Loop.Sync
 import Test.Async.Spec.Report
 import Test.Async.Spec.TestEnv
 import Test.Async.Spec.TestResult
@@ -12,20 +11,13 @@ import Text.Show.Pretty
 
 %default total
 
-export covering
-runAsyncBlocking : Async SyncST es a -> IO (Outcome es a)
-runAsyncBlocking as = do
-  ref <- newref (the (Outcome es a) Canceled)
-  syncApp (dropErrs $ ignore $ guaranteeCase as (writeref ref))
-  readref ref
-
 export %inline
-failWith : Maybe Diff -> String -> Test
+failWith : Maybe Diff -> String -> Test e
 failWith diff msg = pure $ Failure diff msg
 
 ||| Fails with an error that shows the difference between two values.
 export
-failDiff : Show a => Show b => a -> b -> Test
+failDiff : Show a => Show b => a -> b -> Test e
 failDiff x y =
   case valueDiff <$> reify x <*> reify y of
     Nothing =>
@@ -49,20 +41,30 @@ failDiff x y =
         ""
 
 export %inline
-diff : Show a => Show b => a -> (a -> b -> Bool) -> b -> Test
+diff : Show a => Show b => a -> (a -> b -> Bool) -> b -> Test e
 diff x op y = if x `op` y then pure Success else failDiff x y
 
 export infix 6 ===
 
 ||| Fails the test if the two arguments provided are not equal.
 export %inline
-(===) : Eq a => Show a => a -> a -> Test
+(===) : Eq a => Show a => a -> a -> Test e
 (===) x y = diff x (==) y
 
-export covering
-assert : Show a => Eq a => Async SyncST [String] a -> (expected : a) -> IO TestResult
+export
+assert :
+     {auto all   : All Interpolation es}
+  -> {auto showa : Show a}
+  -> {auto eqa   : Eq a}
+  -> Async e es a
+  -> (expected : a)
+  -> Test e
 assert as exp = do
-  runAsyncBlocking as >>= \case
-    Error (Here x) => failWith Nothing "Computation failed with error \{x}"
-    Canceled       => failWith Nothing "Computation was canceled unexpectedly"
-    Succeeded res  => res === exp
+  f <- start as
+  join f >>= \case
+    Succeeded res => res === exp
+    Error err     =>
+     let msg := collapse' $ hzipWith (\_ => interpolate) all err
+      in failWith Nothing "Computation failed with error \{msg}"
+    Canceled      =>
+      failWith Nothing "Computation was canceled unexpectedly"
