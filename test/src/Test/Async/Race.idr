@@ -57,7 +57,7 @@ parameters {auto ref : IORef (SnocList Event)}
 
 run :
      (IORef (SnocList Event) => Async e [String] Nat)
-  -> Async e es (List Event)
+  -> Async e [] (List Event)
 run f = do
   ref <- newref [<]
   fbr <- start (f @{ref})
@@ -70,7 +70,7 @@ run f = do
 -- and appended to the event queue *after* the winning fiber
 -- finished.
 covering
-instrs : List FlatSpecInstr
+instrs : List (FlatSpecInstr e)
 instrs =
   [ "a race" `should` "cancel the second fiber after the first is done" `at`
       (assert
@@ -91,5 +91,5 @@ instrs =
   ]
 
 export covering
-specs : TestTree
+specs : TestTree e
 specs = flatSpec "Race Spec" instrs

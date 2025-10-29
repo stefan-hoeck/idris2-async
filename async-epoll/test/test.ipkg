@@ -1,0 +1,12 @@
+package async-epoll-test
+version = 0.1.0
+authors = "stefan-hoeck"
+
+depends = async-test
+        , async-epoll
+
+sourcedir = "src"
+
+executable = "async-epoll-test"
+
+main = Main

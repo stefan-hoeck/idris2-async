@@ -1,7 +1,6 @@
 module Test.Async.Spec
 
 import public IO.Async
-import public IO.Async.Loop.Sync
 import public IO.Async.Loop.TimerH
 import public Test.Async.Spec.Asserts
 import public Test.Async.Spec.Runner

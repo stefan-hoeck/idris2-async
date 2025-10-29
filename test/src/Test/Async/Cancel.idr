@@ -70,15 +70,14 @@ parameters {auto ref : IORef (SnocList Event)}
     cede
     cancel fbr
 
-run : (IORef (SnocList Event) => Async e es ()) -> Async e es (List Event)
+run : (IORef (SnocList Event) => Async e [] ()) -> Async e [] (List Event)
 run f = do
   ref <- newref [<]
   fbr <- start (f @{ref})
   ignore $ join fbr
   map (<>> []) (runIO (read1 ref))
 
-covering
-instrs : List FlatSpecInstr
+instrs : List (FlatSpecInstr e)
 instrs =
   [ "a fiber" `should` "run to completion if it's not canceled" `at`
       (assert (run $ tickTackTock False False) [Tick,Tack,Tock])
@@ -111,5 +110,5 @@ instrs =
   ]
 
 export covering
-specs : TestTree
+specs : TestTree e
 specs = flatSpec "Cancel Spec" instrs

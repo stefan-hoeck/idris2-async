@@ -2,9 +2,11 @@ package async-test
 version = 0.1.0
 authors = "stefan-hoeck"
 
-depends = async
-        , pretty-show
-        , prettier-ansi
+depends = async-spec
+
+modules = Test.Async.Cancel
+        , Test.Async.Core
+        , Test.Async.Race
 
 sourcedir = "src"
 
