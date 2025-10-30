@@ -22,7 +22,7 @@ delayedErr n msg = primIO (prim__delayedErr n msg)
 
 prog : Async JS [JSErr] ()
 prog = do
-  weakenErrors $ test $ 
+  weakenErrors $ runTree $ 
     Node "Async Spec"
       [ Core.specs
       , Cancel.specs

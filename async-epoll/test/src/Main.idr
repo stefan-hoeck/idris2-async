@@ -8,7 +8,7 @@ import Test.Async.Spec
 
 main : IO ()
 main =
-  epollApp $ test $
+  epollApp $ runTree $
     Node "Async Spec"
       [ Core.specs
       , Cancel.specs
