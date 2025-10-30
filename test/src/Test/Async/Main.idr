@@ -10,7 +10,7 @@ covering
 main : IO ()
 main = do
   snc <- sync
-  runAsync snc $ test $ 
+  runAsync snc $ runTree $ 
     Node "Async Spec"
       [ Core.specs
       , Cancel.specs

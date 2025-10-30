@@ -28,14 +28,12 @@ run (Node name xs) = do
   decDepth
 
 export
-test : TestTree e -> Async e [] ()
-test tree = do
+runTree : TestTree e -> Async e [] ()
+runTree tree = do
   b  <- toBool <$> getEnv "SPEC_COLOR"
   te <- mkEnv b
   run @{te} tree
   ts <- readref te.tests
   fs <- readref te.failures
   summary ts fs
-  if fs > 0
-     then exitFailure
-     else exitSuccess
+  when (fs > 0) exitFailure

@@ -8,7 +8,7 @@ import Test.Async.Spec
 
 main : IO ()
 main =
-  simpleApp $ test $
+  simpleApp $ runTree $
     Node "Async Spec"
       [ Core.specs
       , Cancel.specs
