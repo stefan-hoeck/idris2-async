@@ -41,7 +41,8 @@ data TestTree : Type -> Type where
 
 public export
 data Pre : Type where
-  It : Pre
+  It   : Pre
+  They : Pre
   Desc : String -> Pre
 
 export %inline
@@ -50,6 +51,10 @@ FromString Pre where fromString = Desc
 export %inline
 it : Pre
 it = It
+
+export %inline
+they : Pre
+they = They
 
 export
 record Post e where
@@ -60,6 +65,11 @@ record Post e where
 export %inline
 at : String -> Test e -> Post e
 at = At
+
+||| Operator version of `at`
+export %inline
+(!:) : String -> Test e -> Post e
+(!:) = At
 
 export
 data Verb = Should | Can | Must
@@ -81,7 +91,7 @@ record FlatSpecInstr e where
   pre  : Pre
   post : Post e
 
-export infixr 5 `should`,`at`,`must`,`can`
+export infixr 5 `should`,`at`,`must`,`can`,!:
 
 public export %inline
 should : (pre : Pre) -> (post : Post e) -> FlatSpecInstr e
@@ -123,6 +133,7 @@ flatSpec ttl (FSI v (Desc s) p :: t) @{IsValidInstrs} =
       -> List (TestTree e)
     go sx s sy []                       = sx <>> [Node s $ sy <>> []]
     go sx s sy (FSI v It       p :: xs) = go sx s (sy :< leaf v p) xs
+    go sx s sy (FSI v They     p :: xs) = go sx s (sy :< leaf v p) xs
     go sx s sy (FSI v (Desc n) p :: xs) =
       go (sx :< Node s (sy <>> [])) n [< leaf v p] xs
 
@@ -134,7 +145,7 @@ spec1 : List (FlatSpecInstr e)
 spec1 =
   [ "an empty list" `should` "have length 0" `at` dummy
   ,   it `should` "return Nothing on pop" `at` dummy
-  ,   it `should` "return a value on pop after pushing it" `at` dummy
+  ,   it `should` "return a value on pop after pushing to it" !: dummy
   , "a non-empty list" `should` "have length > 0" `at` dummy
   ,   it `should` "return a Just on pop" `at` dummy
   ]
