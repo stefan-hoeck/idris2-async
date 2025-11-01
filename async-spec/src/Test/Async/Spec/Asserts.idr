@@ -44,7 +44,7 @@ export %inline
 diff : Show a => Show b => a -> (a -> b -> Bool) -> b -> Test e
 diff x op y = if x `op` y then pure Success else failDiff x y
 
-export infix 6 ===
+export infix 6 ===, =!=
 
 ||| Fails the test if the two arguments provided are not equal.
 export %inline
@@ -68,3 +68,14 @@ assert as exp = do
       in failWith Nothing "Computation failed with error \{msg}"
     Canceled      =>
       failWith Nothing "Computation was canceled unexpectedly"
+
+||| Operator version of `assert`
+export %inline
+(=!=) :
+     {auto all   : All Interpolation es}
+  -> {auto showa : Show a}
+  -> {auto eqa   : Eq a}
+  -> Async e es a
+  -> (expected : a)
+  -> Test e
+(=!=) = assert
