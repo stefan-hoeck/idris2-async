@@ -452,3 +452,17 @@ syncApp : Async SyncST [] () -> IO ()
 syncApp as = do
   el  <- sync
   runAsync el as
+
+--------------------------------------------------------------------------------
+-- Stack-safety
+--------------------------------------------------------------------------------
+
+||| A stack-safe alternative to `traverse`, specialized for `List`.
+export
+traverseList : (a -> Async e es b) -> List a -> Async e es (List b)
+traverseList f = go [<]
+  where
+    go : SnocList b -> List a -> Async e es (List b)
+    go sx []        = pure (sx <>> [])
+    go sx (x :: xs) = f x >>= \v => go (sx:<v) xs
+
