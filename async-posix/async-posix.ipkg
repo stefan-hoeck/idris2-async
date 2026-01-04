@@ -5,8 +5,10 @@ brief   = "A poll-based event loop for asynchronous computations on Posix system
 
 depends = async
         , posix
+        , ansi
 
-modules = IO.Async.File
+modules = IO.Async.Console
+        , IO.Async.File
         , IO.Async.Posix
         , IO.Async.Signal
         , IO.Async.Socket

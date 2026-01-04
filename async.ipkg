@@ -13,6 +13,7 @@ modules = IO.Async
         , IO.Async.Core
         , IO.Async.BQueue
         , IO.Async.Channel
+        , IO.Async.Logging
         , IO.Async.Semaphore
         , IO.Async.Service
         , IO.Async.Util
