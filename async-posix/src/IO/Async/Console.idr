@@ -122,9 +122,9 @@ consoleLogger :
   -> Logger e
 consoleLogger c f =
   MkLogger $ \l,ss => case l of
-    Error => cputErrLn (unlines $ f l ss)
-    Fatal => cputErrLn (unlines $ f l ss)
-    _     => cputStrLn (unlines $ f l ss)
+    Error => cputErr (unlines $ f l ss)
+    Fatal => cputErr (unlines $ f l ss)
+    _     => cputStr (unlines $ f l ss)
 
 export
 basicConsoleLogger : ConsoleOut e -> Logger e
