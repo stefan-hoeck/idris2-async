@@ -99,3 +99,31 @@ parameters {auto lg  : Logger e}
   export %inline
   ifatal : Interpolation a => a -> Async e es ()
   ifatal x = fatal (interpolate x)
+
+--------------------------------------------------------------------------------
+-- Loggable
+--------------------------------------------------------------------------------
+
+public export
+interface Interpolation t => Loggable t where
+  logLevel : t -> LogLevel
+
+export
+logLoggable : {0 t : _} -> Logger e => Loggable t => t -> Async e es ()
+logLoggable v = log (logLevel v) (interpolate v)
+
+parameters {0 es     : List Type}
+           {auto lgs : All Loggable es}
+           {auto log : Logger e}
+
+  export
+  unerr : (dflt : t) -> Async e es t -> Async e [] t
+  unerr dflt = handle (mapProperty (\_,v => logLoggable v $> dflt) lgs)
+
+  export %inline
+  unerrMaybe : Async e es t -> Async e [] (Maybe t)
+  unerrMaybe = unerr Nothing . map Just
+
+  export %inline
+  logErrs : Async e es () -> Async e [] ()
+  logErrs = unerr ()
