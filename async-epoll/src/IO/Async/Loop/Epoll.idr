@@ -64,7 +64,7 @@ mkEpoll t =
       waiting # t := ref1 Z t
       handles # t := marray1 maxfiles hdummy t
       events  # t := malloc1 SEpollEvent maxfiles t
-      epoll   # t := dieOnErr (epollCreate 0) t
+      epoll   # t := dieOnErr (epollCreate EPOLL_CLOEXEC) t
    in P waiting maxfiles handles events epoll # t
 
 --------------------------------------------------------------------------------
