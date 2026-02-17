@@ -105,16 +105,11 @@ parameters {auto lg  : Logger e}
 --------------------------------------------------------------------------------
 
 public export
-interface Interpolation t => Loggable t where
-  logLevel : t -> LogLevel
-
-export
-logLoggable : {0 t : _} -> Logger e => Loggable t => t -> Async e es ()
-logLoggable v = log (logLevel v) (interpolate v)
+interface Loggable e t where
+  logLoggable : {0 es : _} -> t -> Async e es ()
 
 parameters {0 es     : List Type}
-           {auto lgs : All Loggable es}
-           {auto log : Logger e}
+           {auto lgs : All (Loggable e) es}
 
   export
   unerr : (dflt : t) -> Async e es t -> Async e [] t
