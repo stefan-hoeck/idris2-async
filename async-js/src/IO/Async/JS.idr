@@ -4,6 +4,7 @@ import Data.Linear.Ref1
 import public JS.Util
 import public JS.Promise
 import public IO.Async
+import public IO.Async.Logging
 import public IO.Async.Loop
 import public IO.Async.Loop.TimerH
 
@@ -98,3 +99,21 @@ spawnImpl s x t =
      False # t := read1 s.running t | True # t => () # t
      _     # t := write1 s.running True t
   in run s [] t
+
+--------------------------------------------------------------------------------
+-- Loggable
+--------------------------------------------------------------------------------
+
+parameters {auto lgs : Loggable JS JSErr}
+
+  export %inline
+  jsunerr : (dflt : t) -> Async JS [JSErr] t -> Async JS [] t
+  jsunerr = unerr
+
+  export %inline
+  jsunerrMaybe : Async JS [JSErr] t -> Async JS [] (Maybe t)
+  jsunerrMaybe = unerrMaybe
+
+  export %inline
+  jslogErrs : Async JS [JSErr] () -> Async JS [] ()
+  jslogErrs = jsunerr ()
