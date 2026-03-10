@@ -38,6 +38,13 @@ app prog = do
   q <- newref [<]
   runAsyncWith (J r q) prog (\_ => putStrLn "Done. Shutting down")
 
+export covering
+runAsPromise : Async JS es a -> IO (Promise $ Outcome es a)
+runAsPromise prog = do
+  r <- newref False
+  q <- newref [<]
+  toPromise (runAsyncWith (J r q) prog)
+
 --------------------------------------------------------------------------------
 -- Timers
 --------------------------------------------------------------------------------
