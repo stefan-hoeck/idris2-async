@@ -19,7 +19,7 @@ record Offerer a where
   constructor O
   token    : IOToken
   value    : a
-  callback : () -> IO1 ()
+  callback : IO1 ()
 
 Eq (Offerer a) where v1 == v2 = v1.token == v2.token
 
@@ -35,10 +35,10 @@ takeV : Taker a -> a -> IO1 (IO1 ())
 takeV (T _ cb) v t = let _ # t := cb v t in unit1 # t
 
 takeO : Offerer a -> Taker a -> a -> IO1 (IO1 ())
-takeO (O _ _ cb) tk v t = let _ # t := cb () t in takeV tk v t
+takeO (O _ _ cb) tk v t = let _ # t := cb t in takeV tk v t
 
 offer : Offerer a -> IO1 (IO1 ())
-offer (O _ _ cb) t = let _ # t := cb () t in unit1 # t
+offer (O _ _ cb) t = let _ # t := cb t in unit1 # t
 
 ||| A concurrent, bounded queue holding values of type `a`.
 |||
@@ -99,7 +99,7 @@ enqueue : BQueue a -> a -> Async e es ()
 enqueue (BQ ref) v =
   primAsync $ \cb,t =>
    let tok # t := token1 t
-    in enq ref (O tok v $ cb . Right) t
+    in enq ref (O tok v $ cb (Right ())) t
 
 ||| Extracts the next value from a bounded queue potentially blocking
 ||| the calling fiber until such a value is available.
