@@ -1,10 +1,11 @@
 module IO.Async.Channel
 
 import Data.Linear.Ref1
-import Data.Linear.Deferred
+import Data.Linear.Unique
 import Data.Queue
 import Derive.Prelude
 import IO.Async
+import Syntax.T1
 
 %default total
 %language ElabReflection
@@ -18,72 +19,88 @@ sendRes : (opn : Bool) -> SendRes
 sendRes True  = Sent
 sendRes False = SentAndClosed
 
+record Offerer a where
+  constructor O
+  token    : IOToken
+  value    : a
+  callback : SendRes -> IO1 ()
+
+%inline
+Eq (Offerer a) where
+  v1 == v2 = v1.token == v2.token
+
+0 Taker : Type -> Type
+Taker a = Maybe a -> IO1 ()
+
 -- internal state of the channel
 record ST a where
   constructor S
   capacity : Nat
   queue    : Queue a
-  taker    : Maybe (Once World $ Maybe a)
-  offerers : Queue (a,Once World SendRes)
+  taker    : Maybe (Taker a)
+  offerers : Queue (Offerer a)
   open_    : Bool
 
-rec : IORef (ST a) -> Poll (Async e) -> Once World (Maybe a) -> IO1 (Async e es (Maybe a))
-rec r poll def t = assert_total $ let x # t := read1 r t in go x x t
+%inline
+takeV : Taker a -> Maybe a -> IO1 (IO1 ())
+takeV cb v t = let _ # t := cb v t in unit1 # t
+
+%inline
+takeO : Bool -> Offerer a -> Taker a -> Maybe a -> IO1 (IO1 ())
+takeO b (O _ _ cb) tk v t = let _ # t := cb (sendRes b) t in takeV tk v t
+
+%inline
+offer : SendRes -> Offerer a -> IO1 (IO1 ())
+offer sr (O _ _ cb) t = let _ # t := cb sr t in unit1 # t
+
+%inline
+unrec : IORef (ST a) -> IO1 ()
+unrec r = casmod1 r $ {taker := Nothing}
+
+%inline
+unoffer : IORef (ST a) -> Offerer a -> IO1 ()
+unoffer r o = casmod1 r $ {offerers $= filter (/= o)}
+
+rec : IORef (ST a) -> (Maybe a -> IO1 ()) -> IO1 (IO1 ())
+rec r cb t = let act # t := casupdate1 r adj t in act t
   where
-    go : ST a -> ST a -> IO1 (Async e es (Maybe a))
-    go x (S cap q ts os opn) t =
+    adj : ST a -> (ST a, IO1 (IO1 ()))
+    adj st@(S cap q ts os opn) =
       case dequeue q of
         Just (n,q2) => case dequeue os of
-          Nothing           => case caswrite1 r x (S (S cap) q2 ts os opn) t of
-            True # t => pure (Just n) # t
-            _    # t => rec r poll def t
-          Just ((y,o), os2) => case caswrite1 r x (S cap (enqueue q2 y) ts os2 opn) t of
-            True # t => (putOnce o (sendRes opn) $> Just n) # t
-            _    # t => rec r poll def t
-        Nothing     => case dequeue os of
-          Nothing           => case opn of
-            True  => case caswrite1 r x (S cap q (Just def) os opn) t of
-              True # t => poll (awaitOnce def) # t
-              _    # t => rec r poll def t
-            False => pure Nothing # t
-          Just ((y,o), os2) => case caswrite1 r x (S cap q ts os2 opn) t of
-            True # t => (putOnce o (sendRes opn) $> Just y) # t
-            _    # t => rec r poll def t
+          Nothing => (S (S cap) q2 ts os opn, takeV cb $ Just n)
+          Just (o, os2) =>
+            (S cap (enqueue q2 o.value) ts os2 opn, takeO opn o cb $ Just n)
+        Nothing => case dequeue os of
+          Nothing => case opn of
+            True  => (S cap q (Just cb) os opn, pure $ unrec r)
+            False => (st, takeV cb Nothing)
+          Just (o, os2) =>
+            (S cap q ts os2 opn, takeO opn o cb $ Just o.value)
 
-cls : IORef (ST a) -> IO1 (Async e es ())
-cls r t = assert_total $ let x # t := read1 r t in go x x t
+snd : IORef (ST a) -> Offerer a -> IO1 (IO1 ())
+snd r o t = let act # t := casupdate1 r adj t in act t
   where
-    go : ST a -> ST a -> IO1 (Async e es ())
-    go x (S cap q ts os opn) t =
+    adj : ST a -> (ST a, IO1 (IO1 ()))
+    adj st@(S cap q ts os opn) =
+     case opn of
+       False => (st, offer Closed o)
+       True  => case ts of
+         Just cb => (S cap q Nothing os opn, takeO opn o cb $ Just o.value)
+         Nothing => case cap of
+           0 => (S 0 q ts (enqueue os o) opn, pure $ unoffer r o)
+           S k => (S k (enqueue q o.value) ts os opn, offer Sent o)
+
+cls : IORef (ST a) -> IO1 ()
+cls r t = let act # t := casupdate1 r adj t in act t
+  where
+    adj : ST a -> (ST a, IO1 ())
+    adj st@(S cap q ts os opn) =
       case opn of
-        False => pure () # t
+        False => (st, unit1)
         True  => case ts of
-          Just def => case caswrite1 r x (S 0 empty Nothing empty False) t of
-            True # t => putOnce def Nothing # t
-            _    # t => cls r t
-          Nothing  => case caswrite1 r x (S cap q ts os False) t of
-            True # t => pure () # t
-            _    # t => cls r t
-
-
-snd : IORef (ST a) -> Poll (Async e) -> Once World SendRes -> a -> IO1 (Async e es SendRes)
-snd r poll def n t = assert_total $ let x # t := read1 r t in go x x t
-  where
-    go : ST a -> ST a -> IO1 (Async e es SendRes)
-    go x (S cap q ts os opn) t =
-      case opn of
-        False  => pure Closed # t
-        True   => case ts of
-          Just o => case caswrite1 r x (S cap q Nothing os opn) t of
-            True # t => (putOnce o (Just n) $> Sent) # t
-            _    # t => snd r poll def n t
-          Nothing  => case cap of
-            0   => case caswrite1 r x (S 0 q ts (enqueue os (n,def)) opn) t of
-              True # t => poll (awaitOnce def) # t
-              _    # t => snd r poll def n t
-            S k => case caswrite1 r x (S k (enqueue q n) ts os opn) t of
-              True # t => pure Sent # t
-              _    # t => snd r poll def n t
+          Just cb => (S 0 empty Nothing empty False, cb Nothing)
+          Nothing => (S cap q ts os False, unit1)
 
 ||| A concurrent, bounded channel holding values of type `a`.
 |||
@@ -119,11 +136,10 @@ channelOf _ = channel
 |||   * `Closed` if the data could not be sent since the channel is closed.
 export
 send : Channel a -> a -> Async e es SendRes
-send (C ref) v = do
-  def <- onceOf SendRes
-  uncancelable $ \poll => do
-    act <- lift1 $ snd ref poll def v
-    act
+send (C ref) v =
+  primAsync $ \cb,t =>
+   let tok # t := token1 t
+    in Channel.snd ref (O tok v $ cb . Right) t
 
 ||| Extracts the next value from a channel potentially blocking
 ||| the calling fiber until such a value is available.
@@ -132,18 +148,11 @@ send (C ref) v = do
 ||| no pending values are left.
 export
 receive : Channel a -> Async e es (Maybe a)
-receive (C ref) = do
-  def <- onceOf (Maybe a)
-  uncancelable $ \poll => do
-    act <- lift1 $ rec ref poll def
-    act
+receive (C ref) = primAsync $ \cb => Channel.rec ref (cb . Right)
 
 ||| Gracefully closes the channel: No more data can be sent
 ||| (`send` will return immedately with `Closed` from now on),
 ||| put pending data can still be received.
 export
 close : Channel a -> Async e es ()
-close (C ref) =
-  uncancelable $ \poll => do
-    act <- lift1 $ cls ref
-    act
+close (C ref) = lift1 $ cls ref

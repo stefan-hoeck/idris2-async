@@ -13,7 +13,9 @@ record Taker a where
   token    : IOToken
   callback : a -> IO1 ()
 
-Eq (Taker a) where v1 == v2 = v1.token == v2.token
+%inline
+Eq (Taker a) where
+  v1 == v2 = v1.token == v2.token
 
 record Offerer a where
   constructor O
@@ -21,7 +23,9 @@ record Offerer a where
   value    : a
   callback : IO1 ()
 
-Eq (Offerer a) where v1 == v2 = v1.token == v2.token
+%inline
+Eq (Offerer a) where
+  v1 == v2 = v1.token == v2.token
 
 -- internal state of the queue
 record ST a where
@@ -31,12 +35,15 @@ record ST a where
   takers   : Queue (Taker a)
   offerers : Queue (Offerer a)
 
+%inline
 takeV : Taker a -> a -> IO1 (IO1 ())
 takeV (T _ cb) v t = let _ # t := cb v t in unit1 # t
 
+%inline
 takeO : Offerer a -> Taker a -> a -> IO1 (IO1 ())
 takeO (O _ _ cb) tk v t = let _ # t := cb t in takeV tk v t
 
+%inline
 offer : Offerer a -> IO1 (IO1 ())
 offer (O _ _ cb) t = let _ # t := cb t in unit1 # t
 
@@ -62,11 +69,11 @@ bqueueOf _ = bqueue
 
 %inline
 untake : IORef (ST a) -> Taker a -> IO1 ()
-untake r t = casmod1 r $ \(S c q ts os) => S c q (filter (/= t) ts) os
+untake r t = casmod1 r $ {takers $= filter (/= t)}
 
 %inline
 unoffer : IORef (ST a) -> Offerer a -> IO1 ()
-unoffer r o = casmod1 r $ \(S c q ts os) => S c q ts (filter (/= o) os)
+unoffer r o = casmod1 r $ {offerers $= filter (/= o)}
 
 deq : IORef (ST a) -> Taker a -> IO1 (IO1 ())
 deq r tk t = let act # t := casupdate1 r adj t in act t
