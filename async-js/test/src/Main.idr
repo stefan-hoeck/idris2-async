@@ -1,6 +1,7 @@
 module Main
 
 import IO.Async.JS
+import Test.Async.BQueue
 import Test.Async.Cancel
 import Test.Async.Core
 import Test.Async.Race
@@ -27,6 +28,7 @@ prog = do
       [ Core.specs
       , Cancel.specs
       , Race.specs
+      , BQueue.specs
       ]
   -- sequencing of timeouts
   sleep 200.ms

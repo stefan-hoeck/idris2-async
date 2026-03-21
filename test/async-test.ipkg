@@ -4,7 +4,8 @@ authors = "stefan-hoeck"
 
 depends = async-spec
 
-modules = Test.Async.Cancel
+modules = Test.Async.BQueue
+        , Test.Async.Cancel
         , Test.Async.Core
         , Test.Async.Race
 
