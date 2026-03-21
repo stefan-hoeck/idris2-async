@@ -1,19 +1,44 @@
 module IO.Async.BQueue
 
 import Data.Linear.Ref1
-import Data.Linear.Deferred
+import Data.Linear.Unique
 import Data.Queue
 import IO.Async
+import Syntax.T1
 
 %default total
+
+record Taker a where
+  constructor T
+  token    : IOToken
+  callback : a -> IO1 ()
+
+Eq (Taker a) where v1 == v2 = v1.token == v2.token
+
+record Offerer a where
+  constructor O
+  token    : IOToken
+  value    : a
+  callback : () -> IO1 ()
+
+Eq (Offerer a) where v1 == v2 = v1.token == v2.token
 
 -- internal state of the queue
 record ST a where
   constructor S
   capacity : Nat
   queue    : Queue a
-  takers   : Queue (Once World a)
-  offerers : Queue (a,Once World ())
+  takers   : Queue (Taker a)
+  offerers : Queue (Offerer a)
+
+takeV : Taker a -> a -> IO1 (IO1 ())
+takeV (T _ cb) v t = let _ # t := cb v t in unit1 # t
+
+takeO : Offerer a -> Taker a -> a -> IO1 (IO1 ())
+takeO (O _ _ cb) tk v t = let _ # t := cb () t in takeV tk v t
+
+offer : Offerer a -> IO1 (IO1 ())
+offer (O _ _ cb) t = let _ # t := cb () t in unit1 # t
 
 ||| A concurrent, bounded queue holding values of type `a`.
 |||
@@ -35,60 +60,52 @@ export %inline
 bqueueOf : Lift1 World f => (0 a : Type) -> Nat -> f (BQueue a)
 bqueueOf _ = bqueue
 
-deq : IORef (ST a) -> Poll (Async e) -> Once World a -> IO1 (Async e es a)
-deq r poll def t = assert_total $ let x # t := read1 r t in go x x t
+%inline
+untake : IORef (ST a) -> Taker a -> IO1 ()
+untake r t = casmod1 r $ \(S c q ts os) => S c q (filter (/= t) ts) os
+
+%inline
+unoffer : IORef (ST a) -> Offerer a -> IO1 ()
+unoffer r o = casmod1 r $ \(S c q ts os) => S c q ts (filter (/= o) os)
+
+deq : IORef (ST a) -> Taker a -> IO1 (IO1 ())
+deq r tk t = let act # t := casupdate1 r adj t in act t
   where
-    go : ST a -> ST a -> IO1 (Async e es a)
-    go x (S cap q ts os) t =
+    adj : ST a -> (ST a, IO1 (IO1 ()))
+    adj (S cap q ts os) =
       case dequeue q of
         Just (n,q2) => case dequeue os of
-          Nothing           => case caswrite1 r x (S (S cap) q2 ts os) t of
-            True # t => pure n # t
-            _    # t => deq r poll def t
-          Just ((y,o), os2) => case caswrite1 r x (S cap (enqueue q2 y) ts os2) t of
-            True # t => (putOnce o () $> n) # t
-            _    # t => deq r poll def t
-        Nothing     => case dequeue os of
-          Nothing           => case caswrite1 r x (S cap q (enqueue ts def) os) t of
-            True # t => poll (awaitOnce def) # t
-            _    # t => deq r poll def t
-          Just ((y,o), os2) => case caswrite1 r x (S cap q ts os2) t of
-            True # t => (putOnce o () $> y) # t
-            _    # t => deq r poll def t
+          Nothing => (S (S cap) q2 ts os, takeV tk n)
+          Just (o,os2) => (S cap (enqueue q2 o.value) ts os2, takeO o tk n)
+        Nothing => case dequeue os of
+          Nothing => (S cap q (enqueue ts tk) os, pure $ untake r tk)
+          Just (o,os2) => (S cap q ts os2, takeO o tk o.value)
 
-enq : IORef (ST a) -> Poll (Async e) -> Once World () -> a -> IO1 (Async e es ())
-enq r poll def n t = assert_total $ let x # t := read1 r t in go x x t
+enq : IORef (ST a) -> Offerer a -> IO1 (IO1 ())
+enq r o t = let act # t := casupdate1 r adj t in act t
   where
-    go : ST a -> ST a -> IO1 (Async e es ())
-    go x (S cap q ts os) t =
+    adj : ST a -> (ST a, IO1 (IO1 ()))
+    adj (S cap q ts os) =
       case dequeue ts of
-        Just (o,ts2) => case caswrite1 r x (S cap q ts2 os) t of
-          True # t => putOnce o n # t
-          _    # t => enq r poll def n t
-        Nothing      => case cap of
-          0   => case caswrite1 r x (S 0 q ts (enqueue os (n,def))) t of
-            True # t => poll (awaitOnce def) # t
-            _    # t => enq r poll def n t
-          S k => case caswrite1 r x (S k (enqueue q n) ts os) t of
-            True # t => pure () # t
-            _    # t => enq r poll def n t
+        Just (t,ts2) => (S cap q ts2 os, takeO o t o.value)
+        Nothing => case cap of
+          0   => (S 0 q ts (enqueue os o), pure $ unoffer r o)
+          S k => (S k (enqueue q o.value) ts os, offer o)
 
 ||| Appends a value to a bounded queue potentially blocking the
 ||| calling fiber until there is some capacity.
 export
 enqueue : BQueue a -> a -> Async e es ()
-enqueue (BQ ref) v = do
-  def <- onceOf ()
-  uncancelable $ \poll => do
-    act <- lift1 $ enq ref poll def v
-    act
+enqueue (BQ ref) v =
+  primAsync $ \cb,t =>
+   let tok # t := token1 t
+    in enq ref (O tok v $ cb . Right) t
 
 ||| Extracts the next value from a bounded queue potentially blocking
 ||| the calling fiber until such a value is available.
 export
 dequeue : BQueue a -> Async e es a
-dequeue (BQ ref) = do
-  def <- onceOf a
-  uncancelable $ \poll => do
-    act <- lift1 $ deq ref poll def
-    act
+dequeue (BQ ref) =
+  primAsync $ \cb,t =>
+   let tok # t := token1 t
+    in deq ref (T tok $ cb . Right) t
