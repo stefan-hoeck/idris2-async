@@ -322,7 +322,9 @@ app :
   -> (prog   : Async Poll [] ())
   -> IO ()
 app n sigs mkPoll prog = do
+  origMask  <- siggetprocmask
   toIO $ sigprocmask SIG_BLOCK sigs
+  origFlags <- runIO (dieOnErr $ getFlags Stdin)
   runIO (dieOnErr $ addFlags Stdin O_NONBLOCK)
   tp <- mkThreadPool n mkPoll
   runAsyncWith (head tp.workers) prog (\_ => putStrLn "Done. Shutting down" >> stop tp)
@@ -331,6 +333,8 @@ app n sigs mkPoll prog = do
   traverse_ (\w => runIO (release w)) tp.workers
   threadWait tp.pollid
   usleep 100
+  runIO (dieOnErr $ setFlags Stdin origFlags)
+  toIO $ sigprocmask SIG_SETMASK origMask
 
 ||| Reads environment variable `IDRIS2_ASYNC_THREADS` and returns
 ||| the number of threads to use. Default: 2.
